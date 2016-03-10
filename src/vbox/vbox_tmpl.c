@@ -3911,6 +3911,15 @@ _vrdxServerSetPorts(vboxGlobalData *data ATTRIBUTE_UNUSED,
                     IVRDxServer *VRDxServer, virDomainGraphicsDefPtr graphics)
 {
     nsresult rc = 0;
+#if VBOX_API_VERSION >= 3001000
+    PRUnichar *rdpPorts = NULL;
+
+    if (graphics->data.rdp.port)
+        rdpPorts = PRUnicharFromInt(graphics->data.rdp.port);
+    else if (graphics->data.rdp.autoport)
+        VBOX_UTF8_TO_UTF16("3389-3589", &rdpPorts);
+#endif
+
 #if VBOX_API_VERSION < 3001000
     if (graphics->data.rdp.port) {
         rc = VRDxServer->vtbl->SetPort(VRDxServer,
@@ -3925,19 +3934,15 @@ _vrdxServerSetPorts(vboxGlobalData *data ATTRIBUTE_UNUSED,
         VIR_DEBUG("VRDP Port changed to default, which is 3389 currently");
     }
 #elif VBOX_API_VERSION < 4000000 /* 3001000 <= VBOX_API_VERSION < 4000000 */
-    PRUnichar *portUtf16 = NULL;
-    portUtf16 = PRUnicharFromInt(graphics->data.rdp.port);
-    rc = VRDxServer->vtbl->SetPorts(VRDxServer, portUtf16);
-    VBOX_UTF16_FREE(portUtf16);
+    rc = VRDxServer->vtbl->SetPorts(VRDxServer, rdpPorts);
+    VBOX_UTF16_FREE(rdpPorts);
 #else /* VBOX_API_VERSION >= 4000000 */
     PRUnichar *VRDEPortsKey = NULL;
-    PRUnichar *VRDEPortsValue = NULL;
     VBOX_UTF8_TO_UTF16("TCP/Ports", &VRDEPortsKey);
-    VRDEPortsValue = PRUnicharFromInt(graphics->data.rdp.port);
     rc = VRDxServer->vtbl->SetVRDEProperty(VRDxServer, VRDEPortsKey,
-                                           VRDEPortsValue);
+                                           rdpPorts);
     VBOX_UTF16_FREE(VRDEPortsKey);
-    VBOX_UTF16_FREE(VRDEPortsValue);
+    VBOX_UTF16_FREE(rdpPorts);
 #endif /* VBOX_API_VERSION >= 4000000 */
     return rc;
 }
