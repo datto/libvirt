@@ -849,6 +849,21 @@ esxVI_MultiCURL_Wait(esxVI_MultiCURL *multi, int *runningHandles)
         rc = poll(multi->pollfds, multi->npollfds, timeout);
     } while (rc < 0 && (errno == EAGAIN || errno == EINTR));
 
+
+    if (rc == 0) {
+        do {
+            errorCode = curl_multi_socket_action(multi->handle, CURL_SOCKET_TIMEOUT,
+                                                 0, runningHandles);
+        } while (errorCode == CURLM_CALL_MULTI_SOCKET);
+
+        if (errorCode != CURLM_OK) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not trigger socket action: %s (%d)"),
+                           curl_multi_strerror(errorCode), errorCode);
+            return -1;
+        }
+    }
+
     if (rc < 0) {
         virReportSystemError(errno, "%s", _("Could not wait for transfer"));
         return -1;
