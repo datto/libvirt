@@ -722,7 +722,6 @@ static bool vboxGetMaxPortSlotValues(IVirtualBox *vbox,
 
     return true;
 }
-# endif /* VBOX_API_VERSION < 4000000 */
 
 /**
  * Converts Utf-16 string to int
@@ -746,6 +745,7 @@ static int PRUnicharToInt(PRUnichar *strUtf16)
 
     return ret;
 }
+# endif /* VBOX_API_VERSION < 4000000 */
 
 /**
  * Converts int to Utf-16 string
@@ -3868,6 +3868,7 @@ _vrdxServerSetEnabled(IVRDxServer *VRDxServer, PRBool enabled)
 
 static nsresult
 _vrdxServerGetPorts(vboxGlobalData *data ATTRIBUTE_UNUSED,
+                    IConsole *console ATTRIBUTE_UNUSED,
                     IVRDxServer *VRDxServer, virDomainGraphicsDefPtr graphics)
 {
     nsresult rc;
@@ -3890,18 +3891,54 @@ _vrdxServerGetPorts(vboxGlobalData *data ATTRIBUTE_UNUSED,
         graphics->data.rdp.autoport = true;
     }
 #else /* VBOX_API_VERSION >= 4000000 */
+    IVRDEServerInfo *vrdeInfo = NULL;
+    PRInt32 port = -1;
     PRUnichar *VRDEPortsKey = NULL;
     PRUnichar *VRDEPortsValue = NULL;
-    VBOX_UTF8_TO_UTF16("TCP/Ports", &VRDEPortsKey);
-    rc = VRDxServer->vtbl->GetVRDEProperty(VRDxServer, VRDEPortsKey, &VRDEPortsValue);
-    VBOX_UTF16_FREE(VRDEPortsKey);
-    if (VRDEPortsValue) {
-        /* even if vbox supports mutilpe ports, single port for now here */
-        graphics->data.rdp.port = PRUnicharToInt(VRDEPortsValue);
-        VBOX_UTF16_FREE(VRDEPortsValue);
-    } else {
-        graphics->data.rdp.autoport = true;
+    ssize_t nmatches = 0;
+    char **matches = NULL;
+    char *portUtf8 = NULL;
+
+    /* for running VM, get the runtime RDP port */
+    if (console) {
+        rc = console->vtbl->GetVRDEServerInfo(console, &vrdeInfo);
+
+        if (NS_SUCCEEDED(rc)) {
+            vrdeInfo->vtbl->GetPort(vrdeInfo, &port);
+            graphics->data.rdp.port = port;
+        }
     }
+
+    VBOX_UTF8_TO_UTF16("TCP/Ports", &VRDEPortsKey);
+    rc = VRDxServer->vtbl->GetVRDEProperty(VRDxServer, VRDEPortsKey,
+                                           &VRDEPortsValue);
+
+    if ((NS_FAILED(rc) || !VRDEPortsValue) && port < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Failed to read RDP port value, rc=%08x"),
+                       (unsigned) rc);
+       goto cleanup;
+    }
+
+    VBOX_UTF16_TO_UTF8(VRDEPortsValue, &portUtf8);
+
+    if (portUtf8) {
+        nmatches = virStringSearch(portUtf8, "(^[[:digit:]]+$)", 1, &matches);
+
+        /* vbox port-range -> autoport */
+        if (nmatches != 1) {
+            graphics->data.rdp.autoport = true;
+        } else if (port < 0 && virStrToLong_i(portUtf8, NULL, 10, &port) == 0) {
+            /* VM is not running but a single port was set */
+            graphics->data.rdp.port = port;
+        }
+    }
+
+ cleanup:
+    virStringFreeList(matches);
+    VBOX_UTF8_FREE(portUtf8);
+    VBOX_UTF16_FREE(VRDEPortsValue);
+    VBOX_UTF16_FREE(VRDEPortsKey);
 #endif /* VBOX_API_VERSION >= 4000000 */
     return rc;
 }

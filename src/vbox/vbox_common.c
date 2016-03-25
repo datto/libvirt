@@ -3410,7 +3410,9 @@ vboxDumpDisplay(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
     PRUnichar *valueTypeUtf16 = NULL;
     char      *valueTypeUtf8  = NULL;
     IVRDxServer *VRDxServer   = NULL;
+    IConsole *console         = NULL;
     PRBool VRDxEnabled        = PR_FALSE;
+    vboxIIDUnion iid;
 
     def->ngraphics = 0;
 
@@ -3511,9 +3513,19 @@ vboxDumpDisplay(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
                 char      *netAddressUtf8    = NULL;
                 PRBool allowMultiConnection  = PR_FALSE;
                 PRBool reuseSingleConnection = PR_FALSE;
+                PRUint32 state;
 
-                gVBoxAPI.UIVRDxServer.GetPorts(data, VRDxServer, def->graphics[def->ngraphics]);
+                gVBoxAPI.UIMachine.GetState(machine, &state);
+                if (gVBoxAPI.machineStateChecker.Running(state)) {
+                    VBOX_IID_INITIALIZE(&iid);
+                    gVBoxAPI.UIMachine.GetId(machine, &iid);
+                    gVBoxAPI.UISession.OpenExisting(data, &iid, machine);
+                    gVBoxAPI.UISession.GetConsole(data->vboxSession, &console);
+                }
+                gVBoxAPI.UIVRDxServer.GetPorts(data, console, VRDxServer,
+                                               def->graphics[def->ngraphics]);
 
+                gVBoxAPI.UISession.Close(data->vboxSession);
                 def->graphics[def->ngraphics]->type = VIR_DOMAIN_GRAPHICS_TYPE_RDP;
 
                 gVBoxAPI.UIVRDxServer.GetNetAddress(data, VRDxServer, &netAddressUtf16);

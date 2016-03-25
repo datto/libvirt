@@ -378,7 +378,8 @@ typedef struct {
 typedef struct {
     nsresult (*GetEnabled)(IVRDxServer *VRDxServer, PRBool *enabled);
     nsresult (*SetEnabled)(IVRDxServer *VRDxServer, PRBool enabled);
-    nsresult (*GetPorts)(vboxGlobalData *data, IVRDxServer *VRDxServer,
+    nsresult (*GetPorts)(vboxGlobalData *data, IConsole *console,
+                         IVRDxServer *VRDxServer,
                          virDomainGraphicsDefPtr graphics);
     nsresult (*SetPorts)(vboxGlobalData *data, IVRDxServer *VRDxServer,
                          virDomainGraphicsDefPtr graphics);
