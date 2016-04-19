@@ -2161,7 +2161,7 @@ static int vboxDomainUndefineFlags(virDomainPtr dom, unsigned int flags)
         detachDevices_common(data, &iid);
     rc = gVBoxAPI.unregisterMachine(data, &iid, &machine);
 
-    DEBUGIID("UUID of machine being undefined", &iid);
+    //DEBUGIID("UUID of machine being undefined", &iid);
 
     if (NS_SUCCEEDED(rc)) {
         gVBoxAPI.deleteConfig(machine);
