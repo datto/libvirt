@@ -364,6 +364,7 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
               "query-cpu-definitions", /* 250 */
               "block-write-threshold",
               "query-named-block-nodes",
+              "mux",
     );
 
 
@@ -417,8 +418,8 @@ struct _virQEMUCaps {
 
     virArch arch;
 
-    virDomainCapsCPUModelsPtr kvmCPUModels;
-    virDomainCapsCPUModelsPtr tcgCPUModels;
+    size_t ncpuDefinitions;
+    char **cpuDefinitions;
 
     size_t nmachineTypes;
     struct virQEMUCapsMachineType *machineTypes;
@@ -1192,6 +1193,8 @@ virQEMUCapsComputeCmdFlags(const char *help,
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_SPICE);
     if (strstr(help, "-vnc"))
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_VNC);
+    if (strstr(help, "-mux"))
+        virQEMUCapsSet(qemuCaps, QEMU_CAPS_MUX);
     if (strstr(help, "seamless-migration="))
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_SEAMLESS_MIGRATION);
     if (strstr(help, "boot=on"))
@@ -4760,78 +4763,12 @@ struct _virQEMUCapsInitQMPCommand {
     virCommandPtr cmd;
     qemuMonitorPtr mon;
     virDomainChrSourceDef config;
-    pid_t pid;
-    virDomainObjPtr vm;
-};
-
-
-static void
-virQEMUCapsInitQMPCommandAbort(virQEMUCapsInitQMPCommandPtr cmd)
-{
-    if (cmd->mon)
-        virObjectUnlock(cmd->mon);
-    qemuMonitorClose(cmd->mon);
-    cmd->mon = NULL;
-
-    virCommandAbort(cmd->cmd);
-    virCommandFree(cmd->cmd);
-    cmd->cmd = NULL;
-
-    if (cmd->monpath)
-        ignore_value(unlink(cmd->monpath));
-
-    virDomainObjEndAPI(&cmd->vm);
-
-    if (cmd->pid != 0) {
-        char ebuf[1024];
-
-        VIR_DEBUG("Killing QMP caps process %lld", (long long) cmd->pid);
-        if (virProcessKill(cmd->pid, SIGKILL) < 0 && errno != ESRCH)
-            VIR_ERROR(_("Failed to kill process %lld: %s"),
-                      (long long) cmd->pid,
-                      virStrerror(errno, ebuf, sizeof(ebuf)));
-
-        VIR_FREE(*cmd->qmperr);
-    }
-    if (cmd->pidfile)
-        unlink(cmd->pidfile);
-    cmd->pid = 0;
-}
-
-
-static void
-virQEMUCapsInitQMPCommandFree(virQEMUCapsInitQMPCommandPtr cmd)
-{
-    if (!cmd)
-        return;
-
-    virQEMUCapsInitQMPCommandAbort(cmd);
-    VIR_FREE(cmd->binary);
-    VIR_FREE(cmd->monpath);
-    VIR_FREE(cmd->monarg);
-    VIR_FREE(cmd->pidfile);
-    VIR_FREE(cmd);
-}
-
-
-static virQEMUCapsInitQMPCommandPtr
-virQEMUCapsInitQMPCommandNew(char *binary,
-                             const char *libDir,
-                             uid_t runUid,
-                             gid_t runGid,
-                             char **qmperr)
-{
-    virQEMUCapsInitQMPCommandPtr cmd = NULL;
-
-    if (VIR_ALLOC(cmd) < 0)
-        goto error;
-
-    if (VIR_STRDUP(cmd->binary, binary) < 0)
-        goto error;
-
-    cmd->runUid = runUid;
-    cmd->runGid = runGid;
-    cmd->qmperr = qmperr;
+    char *monarg = NULL;
+    char *monpath = NULL;
+    char *pidfile = NULL;
+    pid_t pid = 0;
+    virDomainObjPtr vm = NULL;
+    virDomainXMLOptionPtr xmlopt = NULL;
 
     /* the ".sock" sufix is important to avoid a possible clash with a qemu
      * domain called "capabilities"
