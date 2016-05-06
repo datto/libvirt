@@ -58,6 +58,7 @@
         <value>rdp</value>
         <value>desktop</value>
         <value>spice</value>
+        <value>mux</value>
       </enum>
     </graphics>
     <video supported='yes'>

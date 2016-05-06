@@ -132,6 +132,8 @@ struct _virQEMUDriverConfig {
     char *spicePassword;
     bool spiceAutoUnixSocket;
 
+    char *muxDbusObj;
+    char *muxDbusPath;
     bool chardevTLS;
     char *chardevTLSx509certdir;
     bool chardevTLSx509verify;

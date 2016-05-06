@@ -1367,6 +1367,7 @@ typedef enum {
     VIR_DOMAIN_GRAPHICS_TYPE_RDP,
     VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP,
     VIR_DOMAIN_GRAPHICS_TYPE_SPICE,
+    VIR_DOMAIN_GRAPHICS_TYPE_MUX,
 
     VIR_DOMAIN_GRAPHICS_TYPE_LAST
 } virDomainGraphicsType;
@@ -1521,6 +1522,10 @@ struct _virDomainGraphicsDef {
             bool replaceUser;
             bool multiUser;
         } rdp;
+        struct {
+            char *dbusPath;
+            char *dbusObj;
+        } mux;
         struct {
             char *display;
             bool fullscreen;

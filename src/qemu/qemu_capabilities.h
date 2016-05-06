@@ -394,6 +394,7 @@ typedef enum {
     QEMU_CAPS_QUERY_CPU_MODEL_EXPANSION, /* qmp query-cpu-model-expansion */
     QEMU_CAPS_VIRTIO_NET_HOST_MTU, /* virtio-net-*.host_mtu */
     QEMU_CAPS_SPICE_RENDERNODE, /* -spice rendernode */
+    QEMU_CAPS_MUX, /* is -mux available? */
 
     QEMU_CAPS_LAST /* this must always be the last item */
 } virQEMUCapsFlags;
@@ -405,6 +406,12 @@ typedef struct _virQEMUCapsCache virQEMUCapsCache;
 typedef virQEMUCapsCache *virQEMUCapsCachePtr;
 
 virQEMUCapsPtr virQEMUCapsNew(void);
+
+int virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
+                              qemuMonitorPtr mon);
+
+int virQEMUCapsProbeQMP(virQEMUCapsPtr qemuCaps,
+                        qemuMonitorPtr mon);
 
 void virQEMUCapsSet(virQEMUCapsPtr qemuCaps,
                     virQEMUCapsFlags flag) ATTRIBUTE_NONNULL(1);
