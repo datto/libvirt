@@ -550,7 +550,8 @@ VIR_ENUM_IMPL(virDomainGraphics, VIR_DOMAIN_GRAPHICS_TYPE_LAST,
               "vnc",
               "rdp",
               "desktop",
-              "spice")
+              "spice",
+              "mux")
 
 VIR_ENUM_IMPL(virDomainGraphicsListen, VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_LAST,
               "none",
@@ -1253,6 +1254,11 @@ void virDomainGraphicsDefFree(virDomainGraphicsDefPtr def)
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
         VIR_FREE(def->data.spice.keymap);
         virDomainGraphicsAuthDefClear(&def->data.spice.auth);
+        break;
+
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        VIR_FREE(def->data.mux.dbusObj);
+        VIR_FREE(def->data.mux.dbusPath);
         break;
 
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
@@ -10794,6 +10800,9 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
         }
 
         def->data.desktop.display = virXMLPropString(node, "display");
+    } else if (def->type == VIR_DOMAIN_GRAPHICS_TYPE_MUX) {
+        def->data.mux.dbusPath = virXMLPropString(node, "dbusPath");
+        def->data.mux.dbusObj = virXMLPropString(node, "dbusObj");
     } else if (def->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
         xmlNodePtr cur;
         char *port = virXMLPropString(node, "port");
@@ -21210,6 +21219,15 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
 
         break;
 
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        if (def->data.mux.dbusObj)
+            virBufferAsprintf(buf, " dbusObj='%s'",
+                    def->data.mux.dbusObj);
+
+        if (def->data.mux.dbusPath)
+            virBufferAsprintf(buf, " dbusPath='%s'",
+                    def->data.mux.dbusPath);
+        break;
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
         if (def->data.spice.port)
             virBufferAsprintf(buf, " port='%d'",

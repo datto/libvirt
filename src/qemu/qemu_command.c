@@ -8282,6 +8282,52 @@ qemuBuildNumaArgStr(virQEMUDriverConfigPtr cfg,
 
 
 static int
+qemuBuildGraphicsMuxCommandLine(virQEMUDriverConfigPtr cfg,
+                                virCommandPtr cmd,
+                                virQEMUCapsPtr qemuCaps,
+                                virDomainGraphicsDefPtr graphics)
+{
+    virBuffer opt = VIR_BUFFER_INITIALIZER;
+    char *obj = NULL;
+    char *path = NULL;
+
+    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_MUX)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("RDPMux output is not supported with this QEMU"));
+        goto error;
+    }
+
+    if (cfg->muxDbusObj) {
+        obj = cfg->muxDbusObj;
+    } else if (graphics->data.mux.dbusObj) {
+        obj = graphics->data.mux.dbusObj;
+    } else {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                _("RDPMux requires a DBus object and path"));
+    }
+
+    if (cfg->muxDbusPath) {
+        path = cfg->muxDbusPath;
+    } else if (graphics->data.mux.dbusPath) {
+        path = graphics->data.mux.dbusPath;
+    } else {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                _("RDPMux requires a DBus object and path"));
+    }
+
+    virBufferAsprintf(&opt, "dbus-object=%s,", obj);
+    virBufferAsprintf(&opt, "dbus-path=%s", path);
+    virCommandAddArg(cmd, "-mux");
+    virCommandAddArgBuffer(cmd, &opt);
+
+    return 0;
+ error:
+    virBufferFreeAndReset(&opt);
+    return -1;
+}
+
+
+static int
 qemuBuildGraphicsVNCCommandLine(virQEMUDriverConfigPtr cfg,
                                 virCommandPtr cmd,
                                 virDomainDefPtr def,
@@ -8689,6 +8735,8 @@ qemuBuildGraphicsCommandLine(virQEMUDriverConfigPtr cfg,
 
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
         return qemuBuildGraphicsSPICECommandLine(cfg, cmd, qemuCaps, graphics);
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        return qemuBuildGraphicsMuxCommandLine(cfg, cmd, qemuCaps, graphics);
 
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:

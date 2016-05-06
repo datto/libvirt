@@ -314,6 +314,7 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
 
               "vserport-change-event", /* 210 */
               "virtio-balloon-pci.deflate-on-oom",
+              "mux",
     );
 
 
@@ -1137,6 +1138,8 @@ virQEMUCapsComputeCmdFlags(const char *help,
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_SPICE);
     if (strstr(help, "-vnc"))
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_VNC);
+    if (strstr(help, "-mux"))
+        virQEMUCapsSet(qemuCaps, QEMU_CAPS_MUX);
     if (strstr(help, "seamless-migration="))
         virQEMUCapsSet(qemuCaps, QEMU_CAPS_SEAMLESS_MIGRATION);
     if (strstr(help, "boot=on"))
@@ -1465,6 +1468,7 @@ struct virQEMUCapsStringFlags virQEMUCapsCommands[] = {
     { "dump-guest-memory", QEMU_CAPS_DUMP_GUEST_MEMORY },
     { "query-spice", QEMU_CAPS_SPICE },
     { "query-kvm", QEMU_CAPS_KVM },
+    { "query-mux", QEMU_CAPS_MUX },
     { "block-commit", QEMU_CAPS_BLOCK_COMMIT },
     { "query-vnc", QEMU_CAPS_VNC },
     { "drive-mirror", QEMU_CAPS_DRIVE_MIRROR },
