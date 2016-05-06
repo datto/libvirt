@@ -568,7 +568,8 @@ VIR_ENUM_IMPL(virDomainGraphics, VIR_DOMAIN_GRAPHICS_TYPE_LAST,
               "vnc",
               "rdp",
               "desktop",
-              "spice")
+              "spice",
+              "mux")
 
 VIR_ENUM_IMPL(virDomainGraphicsListen, VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_LAST,
               "none",
@@ -1284,6 +1285,11 @@ void virDomainGraphicsDefFree(virDomainGraphicsDefPtr def)
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
         VIR_FREE(def->data.spice.keymap);
         virDomainGraphicsAuthDefClear(&def->data.spice.auth);
+        break;
+
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        VIR_FREE(def->data.mux.dbusObj);
+        VIR_FREE(def->data.mux.dbusPath);
         break;
 
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
@@ -11445,6 +11451,17 @@ virDomainGraphicsDefParseXMLDesktop(virDomainGraphicsDefPtr def,
 
 
 static int
+virDomainGraphicsDefParseXMLMUX(virDomainGraphicsDefPtr def,
+                                xmlNodePtr node)
+{
+    def->data.mux.dbusPath = virXMLPropString(node, "dbusPath");
+    def->data.mux.dbusObj = virXMLPropString(node, "dbusObj");
+
+    return 0;
+}
+
+
+static int
 virDomainGraphicsDefParseXMLSpice(virDomainGraphicsDefPtr def,
                                   xmlNodePtr node,
                                   xmlXPathContextPtr ctxt,
@@ -11790,6 +11807,10 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
         break;
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
         if (virDomainGraphicsDefParseXMLDesktop(def, node) < 0)
+            goto error;
+        break;
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        if (virDomainGraphicsDefParseXMLMUX(def, node) < 0)
             goto error;
         break;
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
@@ -22310,6 +22331,16 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
         if (def->data.desktop.fullscreen)
             virBufferAddLit(buf, " fullscreen='yes'");
 
+        break;
+
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        if (def->data.mux.dbusObj)
+            virBufferAsprintf(buf, " dbusObj='%s'",
+                    def->data.mux.dbusObj);
+
+        if (def->data.mux.dbusPath)
+            virBufferAsprintf(buf, " dbusPath='%s'",
+                    def->data.mux.dbusPath);
         break;
 
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:

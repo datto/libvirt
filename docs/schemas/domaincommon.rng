@@ -2826,6 +2826,17 @@
         </group>
         <group>
           <attribute name="type">
+            <value>mux</value>
+          </attribute>
+          <attribute name="dbusObj">
+            <text />
+          </attribute>
+          <attribute name="dbusPath">
+            <text />
+          </attribute>
+        </group>
+        <group>
+          <attribute name="type">
             <value>spice</value>
           </attribute>
           <optional>

@@ -4086,6 +4086,7 @@ qemuProcessGraphicsAllocatePorts(virQEMUDriverPtr driver,
     case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
         break;
     }
@@ -4148,6 +4149,7 @@ qemuProcessGraphicsSetupListen(virQEMUDriverPtr driver,
     case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
         break;
     }
@@ -4501,6 +4503,7 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
         case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
         case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
         case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+        case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
         case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
             break;
         }

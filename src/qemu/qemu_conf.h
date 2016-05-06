@@ -126,6 +126,9 @@ struct _virQEMUDriverConfig {
     char *spicePassword;
     bool spiceAutoUnixSocket;
 
+    char *muxDbusObj;
+    char *muxDbusPath;
+
     unsigned int remotePortMin;
     unsigned int remotePortMax;
 
