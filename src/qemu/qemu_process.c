@@ -4276,6 +4276,7 @@ qemuProcessGraphicsAllocatePorts(virQEMUDriverPtr driver,
     case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
         break;
     }
@@ -4338,6 +4339,7 @@ qemuProcessGraphicsSetupListen(virQEMUDriverPtr driver,
     case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
         break;
     }
@@ -4775,6 +4777,8 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
                          virCapsPtr caps,
                          unsigned int flags)
 {
+    size_t i;
+
     if (!(flags & VIR_QEMU_PROCESS_START_PRETEND)) {
         if (vm->def->virtType == VIR_DOMAIN_VIRT_KVM) {
             VIR_DEBUG("Checking for KVM availability");

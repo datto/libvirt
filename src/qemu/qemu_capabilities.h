@@ -401,6 +401,7 @@ typedef enum {
     QEMU_CAPS_QUERY_CPU_DEFINITIONS, /* qmp query-cpu-definitions */
     QEMU_CAPS_BLOCK_WRITE_THRESHOLD, /* BLOCK_WRITE_THRESHOLD event */
     QEMU_CAPS_QUERY_NAMED_BLOCK_NODES, /* qmp query-named-block-nodes */
+    QEMU_CAPS_MUX, /* is -mux available? */
 
     QEMU_CAPS_LAST /* this must always be the last item */
 } virQEMUCapsFlags;
@@ -412,6 +413,12 @@ typedef struct _virQEMUCapsCache virQEMUCapsCache;
 typedef virQEMUCapsCache *virQEMUCapsCachePtr;
 
 virQEMUCapsPtr virQEMUCapsNew(void);
+
+int virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
+                              qemuMonitorPtr mon);
+
+int virQEMUCapsProbeQMP(virQEMUCapsPtr qemuCaps,
+                        qemuMonitorPtr mon);
 
 void virQEMUCapsSet(virQEMUCapsPtr qemuCaps,
                     virQEMUCapsFlags flag) ATTRIBUTE_NONNULL(1);

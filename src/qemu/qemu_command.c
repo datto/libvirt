@@ -7712,6 +7712,52 @@ qemuBuildMemoryDeviceCommandLine(virCommandPtr cmd,
 
 
 static int
+qemuBuildGraphicsMuxCommandLine(virQEMUDriverConfigPtr cfg,
+                                virCommandPtr cmd,
+                                virQEMUCapsPtr qemuCaps,
+                                virDomainGraphicsDefPtr graphics)
+{
+    virBuffer opt = VIR_BUFFER_INITIALIZER;
+    char *obj = NULL;
+    char *path = NULL;
+
+    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_MUX)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("RDPMux output is not supported with this QEMU"));
+        goto error;
+    }
+
+    if (cfg->muxDbusObj) {
+        obj = cfg->muxDbusObj;
+    } else if (graphics->data.mux.dbusObj) {
+        obj = graphics->data.mux.dbusObj;
+    } else {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                _("RDPMux requires a DBus object and path"));
+    }
+
+    if (cfg->muxDbusPath) {
+        path = cfg->muxDbusPath;
+    } else if (graphics->data.mux.dbusPath) {
+        path = graphics->data.mux.dbusPath;
+    } else {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                _("RDPMux requires a DBus object and path"));
+    }
+
+    virBufferAsprintf(&opt, "dbus-object=%s,", obj);
+    virBufferAsprintf(&opt, "dbus-path=%s", path);
+    virCommandAddArg(cmd, "-mux");
+    virCommandAddArgBuffer(cmd, &opt);
+
+    return 0;
+ error:
+    virBufferFreeAndReset(&opt);
+    return -1;
+}
+
+
+static int
 qemuBuildGraphicsVNCCommandLine(virQEMUDriverConfigPtr cfg,
                                 virCommandPtr cmd,
                                 virQEMUCapsPtr qemuCaps,
@@ -8119,6 +8165,9 @@ qemuBuildGraphicsCommandLine(virQEMUDriverConfigPtr cfg,
 
     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
         return qemuBuildGraphicsSPICECommandLine(cfg, cmd, qemuCaps, graphics);
+
+    case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+        return qemuBuildGraphicsMuxCommandLine(cfg, cmd, qemuCaps, graphics);
 
     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
     case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
@@ -9675,6 +9724,7 @@ qemuBuildCommandLineValidate(virQEMUDriverPtr driver,
     int sdl = 0;
     int vnc = 0;
     int spice = 0;
+    int mux = 0;
 
     if (!virQEMUDriverIsPrivileged(driver)) {
         /* If we have no cgroups then we can have no tunings that
@@ -9716,6 +9766,9 @@ qemuBuildCommandLineValidate(virQEMUDriverPtr driver,
         case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
             ++spice;
             break;
+        case VIR_DOMAIN_GRAPHICS_TYPE_MUX:
+            ++mux;
+            break;
         case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
         case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
         case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
@@ -9723,10 +9776,10 @@ qemuBuildCommandLineValidate(virQEMUDriverPtr driver,
         }
     }
 
-    if (sdl > 1 || vnc > 1 || spice > 1) {
+    if (sdl > 1 || vnc > 1 || spice > 1 || mux > 1) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("only 1 graphics device of each type "
-                         "(sdl, vnc, spice) is supported"));
+                         "(sdl, vnc, spice, mux) is supported"));
         return -1;
     }
 
