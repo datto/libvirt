@@ -106,6 +106,10 @@ static bool vboxGetMaxPortSlotValues(IVirtualBox *vbox,
     gVBoxAPI.UISystemProperties.GetMaxPortCountForStorageBus(sysProps,
                                                              StorageBus_SCSI,
                                                              &maxPortPerInst[StorageBus_SCSI]);
+    if (gVBoxAPI.supportSas)
+        gVBoxAPI.UISystemProperties.GetMaxPortCountForStorageBus(sysProps,
+                                                                 StorageBus_SAS,
+                                                                 &maxPortPerInst[StorageBus_SAS]);
     gVBoxAPI.UISystemProperties.GetMaxPortCountForStorageBus(sysProps,
                                                              StorageBus_Floppy,
                                                              &maxPortPerInst[StorageBus_Floppy]);
@@ -119,6 +123,10 @@ static bool vboxGetMaxPortSlotValues(IVirtualBox *vbox,
     gVBoxAPI.UISystemProperties.GetMaxDevicesPerPortForStorageBus(sysProps,
                                                                   StorageBus_SCSI,
                                                                   &maxSlotPerPort[StorageBus_SCSI]);
+    if (gVBoxAPI.supportSas)
+        gVBoxAPI.UISystemProperties.GetMaxDevicesPerPortForStorageBus(sysProps,
+                                                                      StorageBus_SAS,
+                                                                      &maxSlotPerPort[StorageBus_SAS]);
     gVBoxAPI.UISystemProperties.GetMaxDevicesPerPortForStorageBus(sysProps,
                                                                   StorageBus_Floppy,
                                                                   &maxSlotPerPort[StorageBus_Floppy]);
@@ -164,7 +172,7 @@ static bool vboxGetDeviceDetails(const char *deviceName,
         return false;
 
     if ((storageBus < StorageBus_IDE) ||
-        (storageBus > StorageBus_Floppy))
+        (storageBus > StorageBus_SAS))
         return false;
 
     total = virDiskNameToIndex(deviceName);
@@ -222,7 +230,7 @@ static char *vboxGenerateMediumName(PRUint32  storageBus,
         return NULL;
 
     if ((storageBus < StorageBus_IDE) ||
-        (storageBus > StorageBus_Floppy))
+        (storageBus > StorageBus_SAS))
         return NULL;
 
     maxPortPerInst = aMaxPortPerInst[storageBus];
@@ -233,8 +241,9 @@ static char *vboxGenerateMediumName(PRUint32  storageBus,
 
     if (storageBus == StorageBus_IDE) {
         prefix = "hd";
-    } else if ((storageBus == StorageBus_SATA) ||
-               (storageBus == StorageBus_SCSI)) {
+    } else if (storageBus == StorageBus_SATA ||
+               storageBus == StorageBus_SCSI ||
+               storageBus == StorageBus_SAS) {
         prefix = "sd";
     } else if (storageBus == StorageBus_Floppy) {
         prefix = "fd";
@@ -972,6 +981,8 @@ vboxSetBootDeviceOrder(virDomainDefPtr def, vboxGlobalData *data,
             device = DeviceType_Floppy;
         } else if (def->os.bootDevs[i] == VIR_DOMAIN_BOOT_CDROM) {
             device = DeviceType_DVD;
+            switch (def->controllers[i]->type) {
+            }
         } else if (def->os.bootDevs[i] == VIR_DOMAIN_BOOT_DISK) {
             device = DeviceType_HardDisk;
         } else if (def->os.bootDevs[i] == VIR_DOMAIN_BOOT_NET) {
@@ -982,13 +993,91 @@ vboxSetBootDeviceOrder(virDomainDefPtr def, vboxGlobalData *data,
 }
 
 static void
+vboxSetStorageController(virDomainControllerDefPtr controller, vboxGlobalData *data, IMachine *machine)
+{
+    PRUnichar *name = NULL;
+    PRInt32 vbox_model = StorageControllerType_Null;
+    PRInt32 vbox_bus = StorageBus_Null;
+    IStorageController *vbox_controller = NULL;
+
+    switch (controller->type) {
+    case VIR_DOMAIN_CONTROLLER_TYPE_FDC:
+        {
+            VBOX_UTF8_TO_UTF16("Floppy Controller", &name);
+            vbox_bus = StorageBus_Floppy;
+        }
+
+        break;
+    case VIR_DOMAIN_CONTROLLER_TYPE_IDE:
+        {
+            VBOX_UTF8_TO_UTF16("IDE Controller", &name);
+            vbox_bus = StorageBus_IDE;
+        }
+
+        break;
+    case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
+        {
+            VBOX_UTF8_TO_UTF16("SCSI Controller", &name);
+            vbox_bus = StorageBus_SCSI;
+        }
+
+        break;
+    case VIR_DOMAIN_CONTROLLER_TYPE_SATA:
+        {
+            VBOX_UTF8_TO_UTF16("SATA Controller", &name);
+            vbox_bus = StorageBus_SATA;
+        }
+
+        break;
+    }
+
+    if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI) {
+        switch (controller->model) {
+        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC:
+            {
+                vbox_model = StorageControllerType_LsiLogic;
+            }
+
+            break;
+        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_BUSLOGIC:
+            {
+                vbox_model = StorageControllerType_BusLogic;
+            }
+
+            break;
+        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1068:
+            {
+                /* vbox has dedicated bus type for SAS with no model option */
+                VBOX_UTF16_FREE(name);
+                VBOX_UTF8_TO_UTF16("SAS Controller", &name);
+                vbox_bus = StorageBus_SAS;
+            }
+
+            break;
+        }
+    }
+
+    gVBoxAPI.UIMachine.AddStorageController(machine,
+                                            name,
+                                            vbox_bus,
+                                            &vbox_controller);
+
+    if (vbox_model != StorageControllerType_Null)
+        gVBoxAPI.UIStorageController.SetControllerType(vbox_controller,
+                                                       vbox_model);
+
+    VBOX_UTF16_FREE(name);
+    VBOX_RELEASE(vbox_controller);
+}
+
+static void
 vboxAttachDrivesNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
 {
     /* AttachDrives for 3.0 and later */
     size_t i;
-    nsresult rc;
-    PRUint32 maxPortPerInst[StorageBus_Floppy + 1] = {};
-    PRUint32 maxSlotPerPort[StorageBus_Floppy + 1] = {};
+    nsresult rc = 0;
+    PRUint32 maxPortPerInst[StorageBus_SAS + 1] = {};
+    PRUint32 maxSlotPerPort[StorageBus_SAS + 1] = {};
     PRUnichar *storageCtlName = NULL;
     bool error = false;
 
@@ -1000,44 +1089,8 @@ vboxAttachDrivesNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine
                                       maxSlotPerPort);
 
     /* add a storage controller for the mediums to be attached */
-    /* this needs to change when multiple controller are supported for
-     * ver > 3.1 */
-    {
-        IStorageController *storageCtl = NULL;
-        PRUnichar *sName = NULL;
-
-        VBOX_UTF8_TO_UTF16("IDE Controller", &sName);
-        gVBoxAPI.UIMachine.AddStorageController(machine,
-                                                sName,
-                                                StorageBus_IDE,
-                                                &storageCtl);
-        VBOX_UTF16_FREE(sName);
-        VBOX_RELEASE(storageCtl);
-
-        VBOX_UTF8_TO_UTF16("SATA Controller", &sName);
-        gVBoxAPI.UIMachine.AddStorageController(machine,
-                                                sName,
-                                                StorageBus_SATA,
-                                                &storageCtl);
-        VBOX_UTF16_FREE(sName);
-        VBOX_RELEASE(storageCtl);
-
-        VBOX_UTF8_TO_UTF16("SCSI Controller", &sName);
-        gVBoxAPI.UIMachine.AddStorageController(machine,
-                                                sName,
-                                                StorageBus_SCSI,
-                                                &storageCtl);
-        VBOX_UTF16_FREE(sName);
-        VBOX_RELEASE(storageCtl);
-
-        VBOX_UTF8_TO_UTF16("Floppy Controller", &sName);
-        gVBoxAPI.UIMachine.AddStorageController(machine,
-                                                sName,
-                                                StorageBus_Floppy,
-                                                &storageCtl);
-        VBOX_UTF16_FREE(sName);
-        VBOX_RELEASE(storageCtl);
-    }
+    for (i = 0; i < def->ncontrollers; i++)
+        vboxSetStorageController(def->controllers[i], data, machine);
 
     for (i = 0; i < def->ndisks && !error; i++) {
         const char *src = virDomainDiskGetSource(def->disks[i]);
@@ -1132,6 +1185,9 @@ vboxAttachDrivesNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine
                 }
             }
 
+            /* asssociate <disc> bus to controller */
+            IStorageController *storageCtl = NULL;
+
             if (def->disks[i]->bus == VIR_DOMAIN_DISK_BUS_IDE) {
                 VBOX_UTF8_TO_UTF16("IDE Controller", &storageCtlName);
                 storageBus = StorageBus_IDE;
@@ -1141,10 +1197,34 @@ vboxAttachDrivesNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine
             } else if (def->disks[i]->bus == VIR_DOMAIN_DISK_BUS_SCSI) {
                 VBOX_UTF8_TO_UTF16("SCSI Controller", &storageCtlName);
                 storageBus = StorageBus_SCSI;
+
+                /* since there's no distinct SAS type in libvirt, check by
+                 * the model to see if vbox bus should for SAS */
+                for (int k = 0; k < def->ncontrollers; k++) {
+                    if (def->controllers[k]->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI &&
+                        def->controllers[k]->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1068) {
+                        if (gVBoxAPI.supportSas) {
+                            VBOX_UTF16_FREE(storageCtlName);
+                            VBOX_UTF8_TO_UTF16("SAS Controller", &storageCtlName);
+                            storageBus = StorageBus_SAS;
+                        } else {
+                            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                           _("SAS Storage controller is not "
+                                             "supported on this vbox version"));
+                            VBOX_MEDIUM_RELEASE(medium);
+                            vboxIIDUnalloc(&mediumUUID);
+                            VBOX_UTF16_FREE(mediumFileUtf16);
+                            VBOX_UTF16_FREE(storageCtlName);
+                            continue;
+                        }
+                    }
+                }
             } else if (def->disks[i]->bus == VIR_DOMAIN_DISK_BUS_FDC) {
                 VBOX_UTF8_TO_UTF16("Floppy Controller", &storageCtlName);
                 storageBus = StorageBus_Floppy;
             }
+
+            VBOX_RELEASE(storageCtl);
 
             /* get the device details i.e instance, port and slot */
             if (!vboxGetDeviceDetails(def->disks[i]->dst,
@@ -3105,8 +3185,8 @@ vboxDumpIDEHDDsNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
     bool error = false;
     int diskCount = 0;
     size_t i;
-    PRUint32   maxPortPerInst[StorageBus_Floppy + 1] = {};
-    PRUint32   maxSlotPerPort[StorageBus_Floppy + 1] = {};
+    PRUint32 maxPortPerInst[StorageBus_SAS + 1] = {};
+    PRUint32 maxSlotPerPort[StorageBus_SAS + 1] = {};
 
     if (gVBoxAPI.oldMediumInterface)
         VIR_WARN("This function may not work in current vbox version");
@@ -3202,7 +3282,8 @@ vboxDumpIDEHDDsNew(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
             def->disks[diskCount]->bus = VIR_DOMAIN_DISK_BUS_IDE;
         } else if (storageBus == StorageBus_SATA) {
             def->disks[diskCount]->bus = VIR_DOMAIN_DISK_BUS_SATA;
-        } else if (storageBus == StorageBus_SCSI) {
+        } else if (storageBus == StorageBus_SCSI ||
+                   storageBus == StorageBus_SAS) {
             def->disks[diskCount]->bus = VIR_DOMAIN_DISK_BUS_SCSI;
         } else if (storageBus == StorageBus_Floppy) {
             def->disks[diskCount]->bus = VIR_DOMAIN_DISK_BUS_FDC;

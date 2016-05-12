@@ -4271,6 +4271,12 @@ _storageControllerGetBus(IStorageController *storageController, PRUint32 *bus)
 }
 
 static nsresult
+_storageControllerSetControllerType(IStorageController *storageController, PRUint32 controllerType)
+{
+    return storageController->vtbl->SetControllerType(storageController, controllerType);
+}
+
+static nsresult
 _sharedFolderGetHostPath(ISharedFolder *sharedFolder, PRUnichar **hostPath)
 {
     return sharedFolder->vtbl->GetHostPath(sharedFolder, hostPath);
@@ -4911,6 +4917,7 @@ static vboxUniformedIMediumAttachment _UIMediumAttachment = {
 
 static vboxUniformedIStorageController _UIStorageController = {
     .GetBus = _storageControllerGetBus,
+    .SetControllerType = _storageControllerSetControllerType,
 };
 
 static vboxUniformedISharedFolder _UISharedFolder = {
@@ -5048,6 +5055,12 @@ void NAME(InstallUniformedAPI)(vboxUniformedAPI *pVBoxAPI)
 #else /* VBOX_API_VERSION > 2002000 */
     pVBoxAPI->hasStaticGlobalData = 1;
 #endif /* VBOX_API_VERSION > 2002000 */
+
+#if VBOX_API_VERSION >= 3002000
+    pVBoxAPI->supportSas = 1;
+#else
+    pVBoxAPI->supportSas = 0;
+#endif
 
 #if VBOX_API_VERSION >= 4000000
     /* Get machine for the call to VBOX_SESSION_OPEN_EXISTING */

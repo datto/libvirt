@@ -443,6 +443,7 @@ typedef struct {
 /* Functions for IStorageController */
 typedef struct {
     nsresult (*GetBus)(IStorageController *storageController, PRUint32 *bus);
+    nsresult (*SetControllerType)(IStorageController *storageController, PRUint32 controllerType);
 } vboxUniformedIStorageController;
 
 /* Functions for ISharedFolder */
@@ -612,6 +613,7 @@ typedef struct {
     bool vboxSnapshotRedefine;
     bool supportScreenshot;
     bool networkRemoveInterface;
+    bool supportSas;
 } vboxUniformedAPI;
 
 virDomainPtr vboxDomainLookupByUUID(virConnectPtr conn,
