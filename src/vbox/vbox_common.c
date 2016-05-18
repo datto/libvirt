@@ -7377,8 +7377,8 @@ vboxDomainScreenshot(virDomainPtr dom,
     vboxIIDUnion iid;
     IMachine *machine = NULL;
     nsresult rc;
-    char *tmp;
-    char *cacheDir;
+    char *tmp = NULL;
+    char *cacheDir = NULL;
     int tmp_fd = -1;
     unsigned int max_screen;
     bool privileged = geteuid() == 0;
@@ -7445,7 +7445,7 @@ vboxDomainScreenshot(virDomainPtr dom,
             if (display) {
                 PRUint32 width, height, bitsPerPixel;
                 PRUint32 screenDataSize;
-                PRUint8 *screenData;
+                PRUint8 *screenData = NULL;
                 PRInt32 xOrigin, yOrigin;
 
                 rc = gVBoxAPI.UIDisplay.GetScreenResolution(display, screen,
