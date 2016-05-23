@@ -4726,6 +4726,7 @@ esxVI_ProductVersionToDefaultVirtualHWVersion(esxVI_ProductLine productLine,
 {
     /* product version == 1000000 * major + 1000 * minor + micro */
     int major = productVersion / 1000000;
+    int minor = productVersion / 1000 - major * 1000;
 
     /*
      * virtualHW.version compatibility matrix:
@@ -4737,6 +4738,7 @@ esxVI_ProductVersionToDefaultVirtualHWVersion(esxVI_ProductLine productLine,
      *   ESX 5.0    + + +        5.0
      *   ESX 5.1    + + + +      5.1
      *   ESX 5.5    + + + + +    5.5
+     *   ESX 6.0    + + + + +    6.0
      *   GSX 2.0    + +          2.5
      */
     switch (productLine) {
@@ -4752,6 +4754,14 @@ esxVI_ProductVersionToDefaultVirtualHWVersion(esxVI_ProductLine productLine,
             return 7;
 
           case 5:
+            if (minor < 5)
+                return 9;
+
+            return 10;
+
+          case 6:
+            return 10;
+
           default:
             return 8;
         }
@@ -4765,6 +4775,14 @@ esxVI_ProductVersionToDefaultVirtualHWVersion(esxVI_ProductLine productLine,
             return 7;
 
           case 5:
+            if (minor < 5)
+                return 9;
+
+            return 10;
+
+          case 6:
+            return 10;
+
           default:
             return 8;
         }
