@@ -2963,7 +2963,8 @@
       explicitly disabled for the guest, <code>model='none'</code> may be
       used.  <span class="since">Since 1.0.5</span>, no default USB controller
       will be built on s390.  The PowerPC64 "spapr-vio" addresses do not have an
-      associated controller.
+      associated controller. An "ide" controller has an optional attribute
+      <code>model</code>, which is one of "piix3", "piix4" or "ich6".
     </p>
 
     <p>
