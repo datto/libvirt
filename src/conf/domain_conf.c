@@ -364,6 +364,11 @@ VIR_ENUM_IMPL(virDomainControllerModelUSB, VIR_DOMAIN_CONTROLLER_MODEL_USB_LAST,
               "qusb2",
               "none")
 
+VIR_ENUM_IMPL(virDomainControllerModelIDE, VIR_DOMAIN_CONTROLLER_MODEL_IDE_LAST,
+              "piix3",
+              "piix4",
+              "ich6")
+
 VIR_ENUM_IMPL(virDomainFS, VIR_DOMAIN_FS_TYPE_LAST,
               "mount",
               "block",
@@ -8177,6 +8182,8 @@ virDomainControllerModelTypeFromString(const virDomainControllerDef *def,
         return virDomainControllerModelUSBTypeFromString(model);
     else if (def->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI)
         return virDomainControllerModelPCITypeFromString(model);
+    else if (def->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE)
+        return virDomainControllerModelIDETypeFromString(model);
 
     return -1;
 }
@@ -8192,6 +8199,8 @@ virDomainControllerModelTypeToString(virDomainControllerDefPtr def,
         return virDomainControllerModelUSBTypeToString(model);
     else if (def->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI)
         return virDomainControllerModelPCITypeToString(model);
+    else if (def->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE)
+        return virDomainControllerModelIDETypeToString(model);
 
     return NULL;
 }
