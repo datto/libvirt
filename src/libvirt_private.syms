@@ -186,6 +186,8 @@ virDomainControllerFind;
 virDomainControllerFindByType;
 virDomainControllerInsert;
 virDomainControllerInsertPreAlloced;
+virDomainControllerModelIDETypeFromString;
+virDomainControllerModelIDETypeToString;
 virDomainControllerModelPCITypeToString;
 virDomainControllerModelSCSITypeFromString;
 virDomainControllerModelSCSITypeToString;
