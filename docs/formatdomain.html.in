@@ -3472,6 +3472,9 @@
          <span class="since">Since 1.3.5</span>, USB controllers accept a
          <code>ports</code> attribute to configure how many devices can be
          connected to the controller.</dd>
+        <dt><code>ide</code></dt>
+        <dd>An <code>ide</code> controller has an optional attribute
+        <code>model</code>, which is one of "piix3", "piix4" or "ich6".</dd>
       </dl>
 
     <p>
