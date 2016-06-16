@@ -1057,6 +1057,29 @@ vboxSetStorageController(virDomainControllerDefPtr controller, vboxGlobalData *d
         }
     }
 
+    if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE) {
+        switch (controller->model) {
+        case VIR_DOMAIN_CONTROLLER_MODEL_IDE_PIIX3:
+            {
+                vbox_model = StorageControllerType_PIIX3;
+            }
+
+            break;
+        case VIR_DOMAIN_CONTROLLER_MODEL_IDE_PIIX4:
+            {
+                vbox_model = StorageControllerType_PIIX4;
+            }
+
+            break;
+        case VIR_DOMAIN_CONTROLLER_MODEL_IDE_ICH6:
+            {
+                vbox_model = StorageControllerType_ICH6;
+            }
+
+            break;
+        }
+    }
+
     gVBoxAPI.UIMachine.AddStorageController(machine,
                                             name,
                                             vbox_bus,
