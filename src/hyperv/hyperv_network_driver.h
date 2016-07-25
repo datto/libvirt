@@ -1,8 +1,8 @@
 /*
- * hyperv_private.h: private driver struct for the Microsoft Hyper-V driver
+ * hyperv_network_driver.h: network driver functions for managing
+ *                          Microsoft Hyper-V host networks
  *
  * Copyright (C) 2011 Matthias Bolte <matthias.bolte@googlemail.com>
- * Copyright (C) 2009 Michael Sievers <msievers83@googlemail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,21 +20,11 @@
  *
  */
 
-#ifndef __HYPERV_PRIVATE_H__
-# define __HYPERV_PRIVATE_H__
+#ifndef __HYPERV_NETWORK_DRIVER_H__
+# define __HYPERV_NETWORK_DRIVER_H__
 
-# include "internal.h"
-# include "virerror.h"
-# include "hyperv_util.h"
-# include "capabilities.h"
-# include "openwsman.h"
+int hypervNetworkRegister(void);
 
-typedef struct _hypervPrivate hypervPrivate;
+extern virNetworkDriver hypervNetworkDriver;
 
-struct _hypervPrivate {
-    hypervParsedUri *parsedUri;
-    WsManClient *client;
-    virCapsPtr caps;
-};
-
-#endif /* __HYPERV_PRIVATE_H__ */
+#endif /* __HYPERV_NETWORK_DRIVER_H__ */

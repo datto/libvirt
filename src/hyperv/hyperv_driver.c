@@ -30,11 +30,13 @@
 #include "virlog.h"
 #include "viruuid.h"
 #include "hyperv_driver.h"
+#include "hyperv_network_driver.h"
 #include "hyperv_private.h"
 #include "hyperv_util.h"
 #include "hyperv_wmi.h"
 #include "openwsman.h"
 #include "virstring.h"
+#include "virtypedparam.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -51,10 +53,17 @@ hypervFreePrivate(hypervPrivate **priv)
         wsmc_release((*priv)->client);
     }
 
+    if ((*priv)->caps != NULL)
+        virObjectUnref((*priv)->caps);
+
     hypervFreeParsedUri(&(*priv)->parsedUri);
     VIR_FREE(*priv);
 }
 
+
+
+/* Forward declaration of hypervCapsInit */
+static virCapsPtr hypervCapsInit(hypervPrivate *priv);
 
 
 static virDrvOpenStatus
@@ -178,6 +187,12 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
     if (computerSystem == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("%s is not a Hyper-V server"), conn->uri->server);
+        goto cleanup;
+    }
+
+    /* Setup capabilities */
+    priv->caps = hypervCapsInit(priv);
+    if (priv->caps == NULL) {
         goto cleanup;
     }
 
@@ -1191,6 +1206,7 @@ hypervDomainManagedSaveRemove(virDomainPtr domain, unsigned int flags)
 }
 
 
+
 #define MATCH(FLAG) (flags & (FLAG))
 static int
 hypervConnectListAllDomains(virConnectPtr conn,
@@ -1323,6 +1339,539 @@ hypervConnectListAllDomains(virConnectPtr conn,
 
 
 
+static int
+hypervConnectGetVersion(virConnectPtr conn, unsigned long *version)
+{
+    int result = -1;
+    hypervPrivate *priv = conn->privateData;
+    CIM_DataFile  *datafile = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    char *p;
+
+    virBufferAddLit(&query, " Select * from CIM_DataFile where Name='c:\\\\windows\\\\system32\\\\vmms.exe' ");
+    if (hypervGetCIMDataFileList(priv, &query, &datafile) < 0) {
+        goto cleanup;
+    }
+
+    /* Check the result of convertion */
+    if (datafile == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_VirtualSystemSettingData",
+                       datafile->data->Version);
+        goto cleanup;
+    }
+
+    /* Delete release number and last digit of build number 1.1.111x.xxxx */
+    p = strrchr(datafile->data->Version,'.');
+    if (p == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse version number from '%s'"),
+                       datafile->data->Version);
+        goto cleanup;
+    }
+    p--;
+    *p = '\0';
+
+    /* Parse Version String to Long */
+    if (virParseVersionString(datafile->data->Version,
+                              version, true) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse version number from '%s'"),
+                       datafile->data->Version);
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)datafile);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+
+static char*
+hypervConnectGetCapabilities(virConnectPtr conn)
+{
+    hypervPrivate *priv = conn->privateData;
+    char *xml = virCapabilitiesFormatXML(priv->caps);
+
+    if (xml == NULL) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    return xml;
+}
+
+static int
+hypervConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ProcessorSettingData *processorSettingData = NULL;
+
+    /* Get Msvm_ProcessorSettingData maximum definition */
+    virBufferAddLit(&query, "SELECT * FROM Msvm_ProcessorSettingData "
+                    "WHERE InstanceID LIKE 'Microsoft:Definition%Maximum'");
+
+    if (hypervGetMsvmProcessorSettingDataList(priv, &query, &processorSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not get maximum definition of Msvm_ProcessorSettingData"));
+        goto cleanup;
+    }
+
+    result = processorSettingData->data->SocketCount * processorSettingData->data->ProcessorsPerSocket;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) processorSettingData);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+
+
+static int
+hypervDomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ProcessorSettingData *processorSettingData = NULL;
+    Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    virCheckFlags(VIR_DOMAIN_VCPU_LIVE | VIR_DOMAIN_VCPU_CONFIG | VIR_DOMAIN_VCPU_MAXIMUM, -1);
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Get Msvm_ComputerSystem */
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    /* If @flags includes VIR_DOMAIN_VCPU_LIVE,
+       this will query a running domain (which will fail if domain is not active) */
+    if (flags & VIR_DOMAIN_VCPU_LIVE) {
+        if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED) {
+            virReportError(VIR_ERR_OPERATION_INVALID, "%s", _("Domain is not active"));
+            goto cleanup;
+        }
+    }
+
+    /* If @flags includes VIR_DOMAIN_VCPU_MAXIMUM, then the maximum virtual CPU limit is queried */
+    if (flags & VIR_DOMAIN_VCPU_MAXIMUM) {
+        result = hypervConnectGetMaxVcpus(domain->conn, NULL);
+        goto cleanup;
+    }
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query, &virtualSystemSettingData) < 0) {
+        goto cleanup;
+    }
+    if (virtualSystemSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not lookup %s for domain %s"),
+                       "Msvm_VirtualSystemSettingData", computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_ProcessorSettingData */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ProcessorSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+    if (hypervGetMsvmProcessorSettingDataList(priv, &query, &processorSettingData) < 0) {
+        goto cleanup;
+    }
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not lookup %s for domain %s"),
+                       "Msvm_ProcessorSettingData", computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    result = processorSettingData->data->VirtualQuantity;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+    hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
+    hypervFreeObject(priv, (hypervObject *)processorSettingData);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+
+
+static int
+hypervDomainGetMaxVcpus(virDomainPtr dom)
+{
+    /* If the guest is inactive, this is basically the same as virConnectGetMaxVcpus() */
+    return (hypervDomainIsActive(dom)) ?
+        hypervDomainGetVcpusFlags(dom, (VIR_DOMAIN_VCPU_LIVE | VIR_DOMAIN_VCPU_MAXIMUM))
+        : hypervConnectGetMaxVcpus(dom->conn, NULL);
+}
+
+
+
+static int
+hypervDomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
+                     unsigned char *cpumaps, int maplen)
+{
+    int count = 0, i;
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Win32_PerfRawData_HvStats_HyperVHypervisorVirtualProcessor *hypervVirtualProcessor = NULL;
+
+    /* FIXME: no information stored in cpumaps */
+    if ((cpumaps != NULL) && (maplen > 0))
+        memset(cpumaps, 0, maxinfo * maplen);
+
+    /* Loop for each vCPU */
+    for (i = 0; i < maxinfo; i++) {
+
+        /* Get vCPU stats */
+        hypervFreeObject(priv, (hypervObject *)hypervVirtualProcessor);
+        hypervVirtualProcessor = NULL;
+        virBufferFreeAndReset(&query);
+        virBufferAddLit(&query, WIN32_PERFRAWDATA_HVSTATS_HYPERVHYPERVISORVIRTUALPROCESSOR_WQL_SELECT);
+        /* Attribute Name format : <domain_name>:Hv VP <vCPU_number> */
+        virBufferAsprintf(&query, "where Name = \"%s:Hv VP %d\"", domain->name, i);
+
+        if (hypervGetWin32PerfRawDataHvStatsHyperVHypervisorVirtualProcessorList(
+                priv, &query, &hypervVirtualProcessor) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not get stats on vCPU #%d"), i);
+            continue;
+        }
+
+        /* Fill structure info */
+        info[i].number = i;
+        if (hypervVirtualProcessor == NULL) {
+            info[i].state = VIR_VCPU_OFFLINE;
+            info[i].cpuTime = 0LLU;
+            info[i].cpu = -1;
+        } else {
+            info[i].state = VIR_VCPU_RUNNING;
+            info[i].cpuTime = hypervVirtualProcessor->data->PercentTotalRunTime;
+            info[i].cpu = i;
+        }
+
+        count++;
+    }
+
+    hypervFreeObject(priv, (hypervObject *)hypervVirtualProcessor);
+    virBufferFreeAndReset(&query);
+
+    return count;
+}
+
+static unsigned long long
+hypervNodeGetFreeMemory(virConnectPtr conn)
+{
+    unsigned long long res = 0;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Win32_OperatingSystem *operatingSystem = NULL;
+
+    /* Get Win32_OperatingSystem */
+    virBufferAddLit(&query, WIN32_OPERATINGSYSTEM_WQL_SELECT);
+
+    if (hypervGetWin32OperatingSystemList(priv, &query, &operatingSystem) < 0) {
+        goto cleanup;
+    }
+
+    if (operatingSystem == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not get Win32_OperatingSystem"));
+        goto cleanup;
+    }
+
+    /* Return free memory in bytes */
+    res = operatingSystem->data->FreePhysicalMemory * 1024;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) operatingSystem);
+    virBufferFreeAndReset(&query);
+
+    return res;
+}
+
+static int
+hypervDomainShutdownFlags(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    bool in_transition = false;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    if (!hypervIsMsvmComputerSystemActive(computerSystem, &in_transition) || in_transition) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Domain is not active or is in state transition"));
+        goto cleanup;
+    }
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange(domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    return result;
+}
+
+
+
+static int
+hypervDomainShutdown(virDomainPtr dom)
+{
+    return hypervDomainShutdownFlags(dom, 0);
+}
+
+static int
+hypervDomainGetSchedulerParametersFlags(virDomainPtr dom, virTypedParameterPtr params,
+                                        int *nparams, unsigned int flags)
+{
+    hypervPrivate *priv = dom->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ProcessorSettingData *processorSettingData = NULL;
+    Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int saved_nparams = 0;
+    int result = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |VIR_DOMAIN_AFFECT_CONFIG |VIR_TYPED_PARAM_STRING_OKAY, -1);
+
+    /* We don't return strings, and thus trivially support this flag */
+    flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+
+    virUUIDFormat(dom->uuid, uuid_string);
+
+    /* Get Msvm_ComputerSystem */
+    if (hypervMsvmComputerSystemFromDomain(dom, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+
+    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query, &virtualSystemSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (virtualSystemSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_VirtualSystemSettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_ProcessorSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ProcessorSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    if (hypervGetMsvmProcessorSettingDataList(priv, &query, &processorSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not lookup %s for domain %s"),
+                       "Msvm_ProcessorSettingData",computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    if (virTypedParameterAssign(&params[0], VIR_DOMAIN_SCHEDULER_LIMIT,
+                                VIR_TYPED_PARAM_LLONG, processorSettingData->data->Limit) < 0)
+        goto cleanup;
+    saved_nparams++;
+
+    if (*nparams > saved_nparams) {
+        if (virTypedParameterAssign(&params[1],VIR_DOMAIN_SCHEDULER_RESERVATION,
+                                    VIR_TYPED_PARAM_LLONG, processorSettingData->data->Reservation) < 0)
+            goto cleanup;
+        saved_nparams++;
+    }
+
+    if (*nparams > saved_nparams) {
+        if (virTypedParameterAssign(&params[2],VIR_DOMAIN_SCHEDULER_WEIGHT,
+                                    VIR_TYPED_PARAM_UINT, processorSettingData->data->Weight) < 0)
+            goto cleanup;
+        saved_nparams++;
+    }
+
+    *nparams = saved_nparams;
+
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+    hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
+    hypervFreeObject(priv, (hypervObject *)processorSettingData);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+
+
+static int
+hypervDomainGetSchedulerParameters(virDomainPtr dom, virTypedParameterPtr params, int *nparams)
+{
+    return hypervDomainGetSchedulerParametersFlags(dom, params, nparams, VIR_DOMAIN_AFFECT_CURRENT);
+}
+
+
+
+static char*
+hypervDomainGetSchedulerType(virDomainPtr domain ATTRIBUTE_UNUSED, int *nparams)
+{
+    char *type;
+
+    if (VIR_STRDUP(type, "allocation") < 0) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    if (nparams != NULL) {
+        *nparams = 3; /* reservation, limit, weight */
+    }
+
+    return type;
+}
+
+static int
+hypervDomainSetAutostart(virDomainPtr domain, int autostart)
+{
+    int result = -1;
+    invokeXmlParam *params = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    virBuffer queryVssd = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
+    properties_t *tab_props = NULL;
+    eprParam eprparam;
+    embeddedParam embeddedparam;
+    int nb_params;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* Prepare EMBEDDED param */
+    virBufferAsprintf(&queryVssd,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+
+    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &queryVssd, &virtualSystemSettingData) < 0)
+        goto cleanup;
+
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    (*tab_props).name = "AutomaticStartupAction";
+    (*tab_props).val = autostart ? "2" : "0";
+    (*(tab_props+1)).name = "InstanceID";
+    (*(tab_props+1)).val = virtualSystemSettingData->data->InstanceID;
+
+    embeddedparam.instanceName =  "Msvm_VirtualSystemGlobalSettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* Create invokeXmlParam tab */
+    nb_params = 2;
+    if (VIR_ALLOC_N(params, nb_params) < 0)
+        goto cleanup;
+    (*params).name = "ComputerSystem";
+    (*params).type = EPR_PARAM;
+    (*params).param = &eprparam;
+    (*(params+1)).name = "SystemSettingData";
+    (*(params+1)).type = EMBEDDED_PARAM;
+    (*(params+1)).param = &embeddedparam;
+
+    result = hypervInvokeMethod(priv, params, nb_params, "ModifyVirtualSystem",
+                             MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) virtualSystemSettingData);
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    virBufferFreeAndReset(&query);
+    virBufferFreeAndReset(&queryVssd);
+
+    return result;
+}
+
+
+
+static int
+hypervDomainGetAutostart(virDomainPtr domain, int *autostart)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemGlobalSettingData *vsgsd = NULL;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_WQL_SELECT);
+    virBufferAsprintf(&query, "where SystemName = \"%s\"", uuid_string);
+
+    if (hypervGetMsvmVirtualSystemGlobalSettingDataList(priv, &query, &vsgsd) < 0)
+        goto cleanup;
+
+    *autostart = vsgsd->data->AutomaticStartupAction;
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) vsgsd);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
 
 static virHypervisorDriver hypervHypervisorDriver = {
     .name = "Hyper-V",
@@ -1358,7 +1907,105 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .domainHasManagedSaveImage = hypervDomainHasManagedSaveImage, /* 0.9.5 */
     .domainManagedSaveRemove = hypervDomainManagedSaveRemove, /* 0.9.5 */
     .connectIsAlive = hypervConnectIsAlive, /* 0.9.8 */
+    .connectGetVersion = hypervConnectGetVersion, /* 1.2.10 */
+    .connectGetCapabilities = hypervConnectGetCapabilities, /* 1.2.10 */
+    .connectGetMaxVcpus = hypervConnectGetMaxVcpus, /* 1.2.10 */
+    .domainGetMaxVcpus = hypervDomainGetMaxVcpus, /* 1.2.10 */
+    .domainGetVcpusFlags = hypervDomainGetVcpusFlags, /* 1.2.10 */
+    .domainGetVcpus = hypervDomainGetVcpus, /* 1.2.10 */
+    .nodeGetFreeMemory = hypervNodeGetFreeMemory, /* 1.2.10 */
+    .domainShutdownFlags = hypervDomainShutdownFlags, /* 1.2.10 */
+    .domainShutdown = hypervDomainShutdown, /* 1.2.10 */
+    .domainGetSchedulerParametersFlags = hypervDomainGetSchedulerParametersFlags, /* 1.2.10 */
+    .domainGetSchedulerParameters = hypervDomainGetSchedulerParameters, /* 1.2.10 */
+    .domainGetSchedulerType = hypervDomainGetSchedulerType, /* 1.2.10 */
+    .domainSetAutostart = hypervDomainSetAutostart, /* 1.2.10 */
+    .domainGetAutostart = hypervDomainGetAutostart, /* 1.2.10 */
 };
+
+/* Retrieves host system UUID  */
+static int
+hypervLookupHostSystemBiosUuid(hypervPrivate *priv, unsigned char *uuid)
+{
+    Win32_ComputerSystemProduct *computerSystem = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, WIN32_COMPUTERSYSTEMPRODUCT_WQL_SELECT);
+
+    if (hypervGetWin32ComputerSystemProductList(priv, &query, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    if (computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("Unable to get Win32_ComputerSystemProduct"));
+        goto cleanup;
+    }
+
+    if (virUUIDParse(computerSystem->data->UUID, uuid) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse UUID from string '%s'"),
+                       computerSystem->data->UUID);
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+
+
+static virCapsPtr hypervCapsInit(hypervPrivate *priv)
+{
+    virCapsPtr caps = NULL;
+    virCapsGuestPtr guest = NULL;
+
+    caps = virCapabilitiesNew(VIR_ARCH_X86_64, 1, 1);
+
+    if (caps == NULL) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    /* virCapabilitiesSetMacPrefix(caps, (unsigned char[]){ 0x00, 0x0c, 0x29 }); */
+
+    if (hypervLookupHostSystemBiosUuid(priv,caps->host.host_uuid) < 0) {
+        goto failure;
+    }
+
+    /* i686 */
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_I686, NULL, NULL, 0, NULL);
+    if (guest == NULL) {
+        goto failure;
+    }
+    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL, 0, NULL) == NULL) {
+        goto failure;
+    }
+
+    /* x86_64 */
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64, NULL, NULL, 0, NULL);
+    if (guest == NULL) {
+        goto failure;
+    }
+    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL, 0, NULL) == NULL) {
+        goto failure;
+    }
+
+    return caps;
+
+ failure:
+    virObjectUnref(caps);
+    return NULL;
+}
+
+
+
 
 
 
@@ -1385,6 +2032,7 @@ hypervDebugHandler(const char *message, debug_level_e level,
 
 static virConnectDriver hypervConnectDriver = {
     .hypervisorDriver = &hypervHypervisorDriver,
+    .networkDriver = &hypervNetworkDriver,
 };
 
 int
