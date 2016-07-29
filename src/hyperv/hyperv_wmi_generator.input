@@ -638,3 +638,131 @@ class Msvm_VirtualSwitch
 	uint32 MaxVMQOffloads
 	uint32 MaxChimneyOffloads
 end
+
+
+class Msvm_ResourceAllocationSettingData
+	string  Caption
+	string  Description
+	string  InstanceID
+	string  ElementName
+	uint16  ResourceType
+	string  OtherResourceType
+	string  ResourceSubType
+	string  PoolID
+	uint16  ConsumerVisibility
+	string  HostResource[]
+	string  AllocationUnits
+	uint64  VirtualQuantity
+	uint64  Reservation
+	uint64  Limit
+	uint32  Weight
+	boolean AutomaticAllocation
+	boolean AutomaticDeallocation
+	string  Parent
+	string  Connection[]
+	string  Address
+	uint16  MappingBehavior
+	string  VirtualSystemIdentifiers[]
+end
+
+
+class Msvm_AllocationCapabilities
+	string Caption
+	string Description
+	string ElementName
+	string InstanceID
+	string OtherResourceType
+	uint16 RequestTypesSupported
+	string ResourceSubType
+	uint16 ResourceType
+	uint16 SharingMode
+	uint16 SupportedAddStates[]
+	uint16 SupportedRemoveStates[]
+end
+
+
+class Msvm_SwitchPort
+	string Caption
+	string ElementName
+	datetime InstallDate
+	string StatusDescriptions[]
+	string Status
+	uint16 HealthState
+	string OtherEnabledState
+	uint16 RequestedState
+	uint16 EnabledDefault
+	string SystemCreationClassName
+	string SystemName
+	string CreationClassName
+	string Description
+	uint16 OperationalStatus[]
+	uint16 EnabledState
+	datetime TimeOfLastStateChange
+	string Name
+	string NameFormat
+	uint16 ProtocolType
+	uint16 ProtocolIFType
+	string OtherTypeDescription
+	boolean BroadcastResetSupported
+	uint16 PortNumber
+	string ScopeOfResidence
+	uint32 VMQOffloadWeight
+	uint32 ChimneyOffloadWeight
+	uint32 VMQOffloadUsage
+	uint32 ChimneyOffloadUsage
+	uint32 VMQOffloadLimit
+	uint32 ChimneyOffloadLimit
+	boolean AllowMacSpoofing
+end
+
+
+class Msvm_SyntheticEthernetPortSettingData
+	string Caption
+	string Description
+	string InstanceID
+	string ElementName
+	uint16 ResourceType
+	string OtherResourceType
+	string ResourceSubType
+	string PoolID
+	uint16 ConsumerVisibility
+	string HostResource[]
+	string AllocationUnits
+	uint64 VirtualQuantity
+	uint64 Reservation
+	uint64 Limit
+	uint32 Weight
+	boolean AutomaticAllocation
+	boolean AutomaticDeallocation
+	string Parent
+	string Connection[]
+	string Address
+	uint16 MappingBehavior
+	string VirtualSystemIdentifiers[]
+	boolean StaticMacAddress
+end
+
+
+class Msvm_VirtualSwitchManagementService
+	string Caption
+	string Description
+	string ElementName
+	datetime InstallDate
+	uint16 OperationalStatus[]
+	string StatusDescriptions[]
+	string Status
+	uint16 HealthState
+	uint16 EnabledState
+	string OtherEnabledState
+	uint16 RequestedState
+	uint16 EnabledDefault
+	datetime TimeOfLastStateChange
+	string SystemCreationClassName
+	string SystemName
+	string CreationClassName
+	string Name
+	string PrimaryOwnerName
+	string PrimaryOwnerContact
+	string StartMode
+	boolean Started
+end

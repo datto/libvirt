@@ -392,6 +392,7 @@ void rmSubstr(char *str, const char *toRemove)
     }
 }
 
+
 int
 hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
                                  Msvm_VirtualSwitch *virtualSwitch, virNetworkPtr *network)
@@ -408,21 +409,27 @@ hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
     // need to parse out the 'Switch-SM-' and '-0' so that its a proper UUID
     rawUuid = virtualSwitch->data->Name;
     rmSubstr(rawUuid, "Switch-SM-");
-    rmSubstr(rawUuid, "-0");
+    char *finalUUID;
 
-    if (virUUIDParse(virtualSwitch->data->Name, uuid) < 0) {
+    finalUUID = (char *)calloc(37, sizeof(char));
+    strncpy(finalUUID, rawUuid, 36);
+
+    if (virUUIDParse(finalUUID, uuid) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not parse UUID from string '%s'"),
-                       virtualSwitch->data->Name);
+                       finalUUID);
+        free(finalUUID);
         return -1;
     }
 
     *network = virGetNetwork(conn, virtualSwitch->data->ElementName, uuid);
 
     if (*network == NULL) {
+        free(finalUUID);
         return -1;
     }
 
+    free(finalUUID);
     return 0;
 }
 
