@@ -1281,8 +1281,85 @@ hypervMsvmComputerSystemEnabledStateToDomainState
     }
 }
 
+int
+hypervMsvmComputerSystemEnabledStateToDomainState2012
+  (Msvm_ComputerSystem_2012 *computerSystem)
+{
+    switch (computerSystem->data->EnabledState) {
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
+        return VIR_DOMAIN_NOSTATE;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED:
+        return VIR_DOMAIN_RUNNING;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED:
+        return VIR_DOMAIN_SHUTOFF;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED:
+        return VIR_DOMAIN_PAUSED;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED: /* managed save */
+        return VIR_DOMAIN_SHUTOFF;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STARTING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SNAPSHOTTING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SAVING:
+        return VIR_DOMAIN_RUNNING;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING:
+        return VIR_DOMAIN_SHUTDOWN;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING:
+        return VIR_DOMAIN_RUNNING;
+
+      default:
+        return VIR_DOMAIN_NOSTATE;
+    }
+}
+
+
 bool
 hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
+                                 bool *in_transition)
+{
+    if (in_transition != NULL)
+        *in_transition = false;
+
+    switch (computerSystem->data->EnabledState) {
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED:
+        return true;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED:
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED:
+        return true;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED: /* managed save */
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STARTING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SNAPSHOTTING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SAVING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING:
+      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING:
+        if (in_transition != NULL)
+            *in_transition = true;
+
+        return true;
+
+      default:
+        return false;
+    }
+}
+
+bool
+hypervIsMsvmComputerSystemActive2012(Msvm_ComputerSystem_2012 *computerSystem,
                                  bool *in_transition)
 {
     if (in_transition != NULL)
@@ -1354,6 +1431,39 @@ hypervMsvmComputerSystemToDomain(virConnectPtr conn,
 }
 
 int
+hypervMsvmComputerSystemToDomain2012(virConnectPtr conn,
+                                 Msvm_ComputerSystem_2012 *computerSystem,
+                                 virDomainPtr *domain)
+{
+    unsigned char uuid[VIR_UUID_BUFLEN];
+
+    if (domain == NULL || *domain != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
+        return -1;
+    }
+
+    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse UUID from string '%s'"),
+                       computerSystem->data->Name);
+        return -1;
+    }
+
+    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid);
+
+    if (*domain == NULL)
+        return -1;
+
+    if (hypervIsMsvmComputerSystemActive2012(computerSystem, NULL)) {
+        (*domain)->id = computerSystem->data->ProcessID;
+    } else {
+        (*domain)->id = -1;
+    }
+
+    return 0;
+}
+
+int
 hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
                                    Msvm_ComputerSystem **computerSystem)
 {
@@ -1374,6 +1484,38 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
     virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
 
     if (hypervGetMsvmComputerSystemList(priv, &query, computerSystem) < 0)
+        return -1;
+
+    if (*computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("No domain with UUID %s"), uuid_string);
+        return -1;
+    }
+
+    return 0;
+}
+
+int
+hypervMsvmComputerSystemFromDomain2012(virDomainPtr domain,
+                                   Msvm_ComputerSystem_2012 **computerSystem)
+{
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    if (computerSystem == NULL || *computerSystem != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
+        return -1;
+    }
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query, computerSystem) < 0)
         return -1;
 
     if (*computerSystem == NULL) {
