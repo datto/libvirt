@@ -36,6 +36,9 @@
 #define ROOT_VIRTUALIZATION \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
 
+#define ROOT_VIRTUALIZATION_V2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/*"
+
 
 void rmSubstr(char *str, const char *toRemove);
 
@@ -191,6 +194,10 @@ int hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
 
 int hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
 		Msvm_VirtualSwitch *virtualSwitch, virNetworkPtr *network);
+
+
+int hypervMsvmVirtualHardDiskSettingFromDomain(virDomainPtr domain,
+                                        Msvm_VirtualHardDiskSettingData **virtualHardDisk);
 
 
 

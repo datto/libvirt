@@ -55,6 +55,39 @@ class Msvm_ComputerSystem
     uint16   AssignedNumaNodeList[]
 end
 
+class Msvm_ComputerSystem_2012
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    uint16   OperationalStatus[]
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    uint16   EnabledState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    datetime TimeOfLastStateChange
+    string   CreationClassName
+    string   Name
+    string   PrimaryOwnerName
+    string   PrimaryOwnerContact
+    string   Roles[]
+    string   NameFormat
+    string   OtherIdentifyingInfo[]
+    string   IdentifyingDescriptions[]
+    uint16   Dedicated[]
+    string   OtherDedicatedDescriptions[]
+    uint16   ResetCapability
+    uint16   PowerManagementCapabilities[]
+    uint64   OnTimeInMilliseconds
+    datetime TimeOfLastConfigurationChange
+    uint32   ProcessID
+    uint16   AssignedNumaNodeList[]
+end
+
+
 
 class Msvm_ConcreteJob
     string   Caption
@@ -765,4 +798,20 @@ class Msvm_VirtualSwitchManagementService
 	string PrimaryOwnerContact
 	string StartMode
 	boolean Started
+end
+
+class Msvm_VirtualHardDiskSettingData
+    string InstanceID
+    string Caption
+    string Description
+    string ElementName
+    uint16 Type
+    uint16 Format
+    string Path
+    string ParentPath
+    uint64 MaxInternalSize
+    uint32 BlockSize
+    uint32 LogicalSectorSize
+    uint32 PhysicalSectorSize
+    string VirtualDiskId
 end

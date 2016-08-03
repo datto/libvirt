@@ -70,6 +70,8 @@ class Class:
 
         if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/%s\"\n" % self.name
+        elif self.name.endswith("_2012"):
+            header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/%s\"\n" % self.name
         else:
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/%s\"\n" % self.name
 
@@ -137,6 +139,8 @@ class Class:
 
         if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
             source += "    return hypervEnumAndPull(priv, query, ROOT_CIMV2,\n"
+        elif self.name.endswith("_2012"):
+            source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION_V2,\n"
         else:
             source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION,\n"
 
@@ -347,7 +351,7 @@ def main():
     classes_source.write(notice)
 
     cimtypes_header.write(notice)
-    cimtypes_header.write(generate_cimtypes_header1())	
+    cimtypes_header.write(generate_cimtypes_header1())
 
     names = classes_by_name.keys()
     names.sort()

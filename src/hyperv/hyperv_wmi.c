@@ -1385,6 +1385,24 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
     return 0;
 }
 
+int
+hypervMsvmVirtualHardDiskSettingFromDomain(virDomainPtr domain,
+                                            Msvm_VirtualHardDiskSettingData **virtualHardDisk)
+{
+    //hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    //virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    if (virtualHardDisk == NULL || *virtualHardDisk != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
+        return -1;
+    }
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    return 0;
+}
+
 
 
 #include "hyperv_wmi.generated.c"

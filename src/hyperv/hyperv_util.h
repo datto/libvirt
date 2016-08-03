@@ -25,6 +25,9 @@
 # include "internal.h"
 # include "viruri.h"
 
+#define HYPERV_VERSION_2008 "6.1"
+#define HYPERV_VERSION_2012 "6.3"
+
 typedef struct _hypervParsedUri hypervParsedUri;
 
 struct _hypervParsedUri {
