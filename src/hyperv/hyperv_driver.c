@@ -27,6 +27,7 @@
 #include "virdomainobjlist.h"
 #include "virauth.h"
 #include "viralloc.h"
+#include "virkeycode.h"
 #include "virlog.h"
 #include "viruuid.h"
 #include "hyperv_driver.h"
@@ -2899,6 +2900,127 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     return result;
 }
 
+static int
+hypervDomainSendKey(virDomainPtr domain,
+                  unsigned int codeset,
+                  unsigned int holdtime,
+                  unsigned int *keycodes,
+                  int nkeycodes,
+                  unsigned int flags)
+{
+    int result = -1, nb_params, i;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char *selector = "CreationClassName=Msvm_Keyboard";
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_Keyboard *keyboard = NULL;
+    invokeXmlParam *params = NULL;
+    int *keyDownCodes = NULL;
+    int *keyUpCodes = NULL;
+    int keycode;
+
+    virCheckFlags(0, -1);
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Get computer system */
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* Get keyboard */
+    virBufferAddLit(&query, "associators of ");
+    virBufferAsprintf(&query, "{%s.Name='%s'} ",
+			MSVM_COMPUTERSYSTEM_CLASSNAME, uuid_string);
+    virBufferAddLit(&query, "where resultClass = ");
+    virBufferAddLit(&query, MSVM_KEYBOARD_CLASSNAME);
+
+    if (hypervGetMsvmKeyboardList(priv, &query, &keyboard) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("No keyboard for domain with UUID %s"), uuid_string);
+        goto cleanup;
+	}
+
+    /* Translate keycodes to xt and generate keyup scancodes;
+       this is copied from the vbox driver */
+    keyDownCodes = (int *) keycodes;
+
+    if (VIR_ALLOC_N(keyUpCodes, nkeycodes) < 0)
+        goto cleanup;
+
+    for (i = 0; i < nkeycodes; i++) {
+        if (codeset != VIR_KEYCODE_SET_XT) {
+            keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_XT,
+                                               keyDownCodes[i]);
+            if (keycode < 0) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("cannot translate keycode %u of %s codeset to"
+                                 " xt keycode"),
+                               keyDownCodes[i],
+                               virKeycodeSetTypeToString(codeset));
+                goto cleanup;
+            }
+            keyDownCodes[i] = keycode;
+        }
+
+        keyUpCodes[i] = keyDownCodes[i] + 0x80;
+    }
+
+    /* Press keys */
+    for (i = 0; i < nkeycodes; i++) {
+        VIR_FREE(params);
+        nb_params = 1;
+
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &keyDownCodes[i];
+
+        if (hypervInvokeMethod(priv, params, nb_params, "PressKey",
+                               MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not press key with code %d"),
+                           keyDownCodes[i]);
+            goto cleanup;
+        }
+    }
+
+    /* Hold keys (copied from vbox driver); since Hyper-V does not support
+	   holdtime, simulate it by sleeping and then sending the release keys */
+    if (holdtime > 0)
+        usleep(holdtime * 1000);
+
+    /* Release keys */
+    for (i = 0; i < nkeycodes; i++) {
+        VIR_FREE(params);
+        nb_params = 1;
+
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &keyUpCodes[i];
+
+        if (hypervInvokeMethod(priv, params, nb_params, "ReleaseKey",
+                               MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not release key with code %d"),
+                           keyUpCodes[i]);
+            goto cleanup;
+        }
+    }
+
+    result = 0;
+
+    cleanup:
+        VIR_FREE(params);
+        hypervFreeObject(priv, (hypervObject *) computerSystem);
+        hypervFreeObject(priv, (hypervObject *) keyboard);
+        virBufferFreeAndReset(&query);
+        return result;
+}
 
 /*
  * Create the attribute __PATH for the SwitchPort object.
@@ -3370,6 +3492,7 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .domainGetMaxVcpus = hypervDomainGetMaxVcpus, /* 1.2.10 */
     .domainGetVcpusFlags = hypervDomainGetVcpusFlags, /* 1.2.10 */
     .domainGetVcpus = hypervDomainGetVcpus, /* 1.2.10 */
+    .domainSendKey = hypervDomainSendKey, /* 1.3.x */
     .nodeGetFreeMemory = hypervNodeGetFreeMemory, /* 1.2.10 */
     .domainShutdownFlags = hypervDomainShutdownFlags, /* 1.2.10 */
     .domainShutdown = hypervDomainShutdown, /* 1.2.10 */
