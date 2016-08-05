@@ -598,6 +598,29 @@ hypervDomainResume(virDomainPtr domain)
 
 
 static int
+hypervDomainReboot(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_REBOOT);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
+
+
+
+static int
 hypervDomainDestroyFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
@@ -3105,6 +3128,7 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .domainLookupByName = hypervDomainLookupByName, /* 0.9.5 */
     .domainSuspend = hypervDomainSuspend, /* 0.9.5 */
     .domainResume = hypervDomainResume, /* 0.9.5 */
+    .domainReboot = hypervDomainReboot, /* 1.3.x */
     .domainDestroy = hypervDomainDestroy, /* 0.9.5 */
     .domainDestroyFlags = hypervDomainDestroyFlags, /* 0.9.5 */
     .domainGetOSType = hypervDomainGetOSType, /* 0.9.5 */
