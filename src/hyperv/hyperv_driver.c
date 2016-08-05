@@ -2902,15 +2902,15 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
 
 static int
 hypervDomainSendKey(virDomainPtr domain,
-                  unsigned int codeset,
-                  unsigned int holdtime,
-                  unsigned int *keycodes,
-                  int nkeycodes,
-                  unsigned int flags)
+                    unsigned int codeset,
+                    unsigned int holdtime,
+                    unsigned int *keycodes,
+                    int nkeycodes,
+                    unsigned int flags)
 {
     int result = -1, nb_params, i;
+    char *selector = NULL;    
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    const char *selector = "CreationClassName=Msvm_Keyboard";
     hypervPrivate *priv = domain->conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
@@ -2919,6 +2919,7 @@ hypervDomainSendKey(virDomainPtr domain,
     int *keyDownCodes = NULL;
     int *keyUpCodes = NULL;
     int keycode;
+    simpleParam simpleparam;
 
     virCheckFlags(0, -1);
     virUUIDFormat(domain->uuid, uuid_string);
@@ -2928,17 +2929,19 @@ hypervDomainSendKey(virDomainPtr domain,
         goto cleanup;
 
     /* Get keyboard */
-    virBufferAddLit(&query, "associators of ");
-    virBufferAsprintf(&query, "{%s.Name='%s'} ",
-			MSVM_COMPUTERSYSTEM_CLASSNAME, uuid_string);
-    virBufferAddLit(&query, "where resultClass = ");
-    virBufferAddLit(&query, MSVM_KEYBOARD_CLASSNAME);
+    /* Get host name */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where ResultClass = Msvm_Keyboard",
+                      uuid_string);
 
     if (hypervGetMsvmKeyboardList(priv, &query, &keyboard) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("No keyboard for domain with UUID %s"), uuid_string);
         goto cleanup;
-	}
+    }
 
     /* Translate keycodes to xt and generate keyup scancodes;
        this is copied from the vbox driver */
@@ -2964,6 +2967,10 @@ hypervDomainSendKey(virDomainPtr domain,
 
         keyUpCodes[i] = keyDownCodes[i] + 0x80;
     }
+        
+    if (virAsprintf(&selector, "DeviceID=%s&CreationClassName=Msvm_Keyboard",
+                keyboard->data->DeviceID) < 0)
+        goto cleanup;
 
     /* Press keys */
     for (i = 0; i < nkeycodes; i++) {
@@ -2973,9 +2980,14 @@ hypervDomainSendKey(virDomainPtr domain,
         if (VIR_ALLOC_N(params, nb_params) < 0)
             goto cleanup;
 
-        (*params).name = "keyCode";
-        (*params).type = SIMPLE_PARAM;
-        (*params).param = &keyDownCodes[i];
+        char keyCodeStr[sizeof(int)*3+2];
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyDownCodes[i]);
+
+		simpleparam.value = keyCodeStr;
+
+        params->name = "keyCode";
+        params->type = SIMPLE_PARAM;
+        params->param = &simpleparam;
 
         if (hypervInvokeMethod(priv, params, nb_params, "PressKey",
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
@@ -2999,9 +3011,14 @@ hypervDomainSendKey(virDomainPtr domain,
         if (VIR_ALLOC_N(params, nb_params) < 0)
             goto cleanup;
 
-        (*params).name = "keyCode";
-        (*params).type = SIMPLE_PARAM;
-        (*params).param = &keyUpCodes[i];
+        char keyCodeStr[sizeof(int)*3+2];
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyUpCodes[i]);
+
+		simpleparam.value = keyCodeStr;
+
+        params->name = "keyCode";
+        params->type = SIMPLE_PARAM;
+        params->param = &simpleparam;
 
         if (hypervInvokeMethod(priv, params, nb_params, "ReleaseKey",
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
