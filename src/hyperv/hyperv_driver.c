@@ -2952,7 +2952,7 @@ hypervDomainSendKey(virDomainPtr domain,
             if (keycode < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("cannot translate keycode %u of %s codeset to"
-                                 " xt keycode"),
+                                 " win32 keycode"),
                                translatedKeyCodes[i],
                                virKeycodeSetTypeToString(codeset));
                 goto cleanup;
