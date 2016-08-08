@@ -2916,8 +2916,7 @@ hypervDomainSendKey(virDomainPtr domain,
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_Keyboard *keyboard = NULL;
     invokeXmlParam *params = NULL;
-    int *keyDownCodes = NULL;
-    int *keyUpCodes = NULL;
+    int *translatedKeyCodes = NULL;
     int keycode;
     simpleParam simpleparam;
 
@@ -2929,7 +2928,6 @@ hypervDomainSendKey(virDomainPtr domain,
         goto cleanup;
 
     /* Get keyboard */
-    /* Get host name */
     virBufferAsprintf(&query,
                       "associators of "
                       "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
@@ -2945,27 +2943,23 @@ hypervDomainSendKey(virDomainPtr domain,
 
     /* Translate keycodes to xt and generate keyup scancodes;
        this is copied from the vbox driver */
-    keyDownCodes = (int *) keycodes;
-
-    if (VIR_ALLOC_N(keyUpCodes, nkeycodes) < 0)
-        goto cleanup;
+    translatedKeyCodes = (int *) keycodes;
 
     for (i = 0; i < nkeycodes; i++) {
         if (codeset != VIR_KEYCODE_SET_WIN32) {
             keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_XT,
-                                               keyDownCodes[i]);
+                                               translatedKeyCodes[i]);
             if (keycode < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("cannot translate keycode %u of %s codeset to"
                                  " xt keycode"),
-                               keyDownCodes[i],
+                               translatedKeyCodes[i],
                                virKeycodeSetTypeToString(codeset));
                 goto cleanup;
             }
-            keyDownCodes[i] = keycode;
-        }
 
-        keyUpCodes[i] = keyDownCodes[i] + 0x80;
+            translatedKeyCodes[i] = keycode;
+        }
     }
         
     if (virAsprintf(&selector, 
@@ -2983,7 +2977,7 @@ hypervDomainSendKey(virDomainPtr domain,
             goto cleanup;
 
         char keyCodeStr[sizeof(int)*3+2];
-        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyDownCodes[i]);
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", translatedKeyCodes[i]);
 
 		simpleparam.value = keyCodeStr;
 
@@ -2995,7 +2989,7 @@ hypervDomainSendKey(virDomainPtr domain,
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not press key with code %d"),
-                           keyDownCodes[i]);
+                           translatedKeyCodes[i]);
             goto cleanup;
         }
     }
@@ -3014,7 +3008,7 @@ hypervDomainSendKey(virDomainPtr domain,
             goto cleanup;
 
         char keyCodeStr[sizeof(int)*3+2];
-        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyDownCodes[i]);
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", translatedKeyCodes[i]);
 
 		simpleparam.value = keyCodeStr;
 
@@ -3026,7 +3020,7 @@ hypervDomainSendKey(virDomainPtr domain,
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not release key with code %d"),
-                           keyDownCodes[i]);
+                           translatedKeyCodes[i]);
             goto cleanup;
         }
     }
