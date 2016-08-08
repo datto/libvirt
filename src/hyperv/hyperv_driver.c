@@ -2947,7 +2947,7 @@ hypervDomainSendKey(virDomainPtr domain,
 
     for (i = 0; i < nkeycodes; i++) {
         if (codeset != VIR_KEYCODE_SET_WIN32) {
-            keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_XT,
+            keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_WIN32,
                                                translatedKeyCodes[i]);
             if (keycode < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
