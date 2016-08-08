@@ -2951,7 +2951,7 @@ hypervDomainSendKey(virDomainPtr domain,
         goto cleanup;
 
     for (i = 0; i < nkeycodes; i++) {
-        if (codeset != VIR_KEYCODE_SET_XT) {
+        if (codeset != VIR_KEYCODE_SET_WIN32) {
             keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_XT,
                                                keyDownCodes[i]);
             if (keycode < 0) {
@@ -2968,8 +2968,10 @@ hypervDomainSendKey(virDomainPtr domain,
         keyUpCodes[i] = keyDownCodes[i] + 0x80;
     }
         
-    if (virAsprintf(&selector, "DeviceID=%s&CreationClassName=Msvm_Keyboard",
-                keyboard->data->DeviceID) < 0)
+    if (virAsprintf(&selector, 
+                    "CreationClassName=Msvm_Keyboard&DeviceID=%s&"
+                    "SystemCreationClassName=Msvm_ComputerSystem&SystemName=%s",
+                    keyboard->data->DeviceID, uuid_string) < 0)
         goto cleanup;
 
     /* Press keys */
@@ -2985,9 +2987,9 @@ hypervDomainSendKey(virDomainPtr domain,
 
 		simpleparam.value = keyCodeStr;
 
-        params->name = "keyCode";
-        params->type = SIMPLE_PARAM;
-        params->param = &simpleparam;
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &simpleparam;
 
         if (hypervInvokeMethod(priv, params, nb_params, "PressKey",
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
@@ -3012,19 +3014,19 @@ hypervDomainSendKey(virDomainPtr domain,
             goto cleanup;
 
         char keyCodeStr[sizeof(int)*3+2];
-        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyUpCodes[i]);
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", keyDownCodes[i]);
 
 		simpleparam.value = keyCodeStr;
 
-        params->name = "keyCode";
-        params->type = SIMPLE_PARAM;
-        params->param = &simpleparam;
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &simpleparam;
 
         if (hypervInvokeMethod(priv, params, nb_params, "ReleaseKey",
                                MSVM_KEYBOARD_RESOURCE_URI, selector) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not release key with code %d"),
-                           keyUpCodes[i]);
+                           keyDownCodes[i]);
             goto cleanup;
         }
     }
