@@ -186,6 +186,7 @@ class Property:
                "int16"    : "INT16",
                "int32"    : "INT32",
                "int64"    : "INT64",
+               "sint8"    : "INT8",
                "sint16"   : "INT16",
                "uint8"    : "UINT8",
                "uint16"   : "UINT16",
