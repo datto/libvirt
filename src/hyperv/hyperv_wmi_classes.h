@@ -59,6 +59,7 @@ enum _Msvm_ComputerSystem_EnabledState {
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING = 32777      /*   active */
 };
 
+/* https://msdn.microsoft.com/en-us/library/cc723874(v=vs.85).aspx */
 enum _Msvm_ComputerSystem_RequestedState {
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED = 2,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED = 3,
@@ -67,7 +68,12 @@ enum _Msvm_ComputerSystem_RequestedState {
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_SUSPENDED = 32769,
 };
 
-
+/* https://msdn.microsoft.com/en-us/library/hh850279(v=vs.85).aspx */
+enum _Msvm_ComputerSystem_2012_RequestedState {
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RUNNING = 2,
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_OFF = 3,
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RESET = 11,
+};
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ConcreteJob
