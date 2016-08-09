@@ -3303,6 +3303,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainLookupByID = hypervDomainLookupByID2012;
         hypervHypervisorDriver.domainLookupByUUID = hypervDomainLookupByUUID2012;
         hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName2012;
+        hypervHypervisorDriver.domainShutdownFlags = hypervDomainShutdownFlags2012;
+        hypervHypervisorDriver.domainShutdown = hypervDomainShutdown2012;       
     } else {
         hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 0.9.5 */
         hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 0.9.5 */
