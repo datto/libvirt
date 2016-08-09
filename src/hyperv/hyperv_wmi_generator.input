@@ -767,7 +767,6 @@ class Msvm_VirtualSystemManagementService_2012
     string   Description
     string   ElementName
     datetime InstallDate
-    string   Name
     uint16   OperationalStatus[]
     string   StatusDescriptions[]
     string   Status
@@ -786,11 +785,13 @@ class Msvm_VirtualSystemManagementService_2012
     string   SystemCreationClassName
     string   SystemName
     string   CreationClassName
+    string   Name
     string   PrimaryOwnerName
     string   PrimaryOwnerContact
     string   StartMode
     boolean  Started
 end
+
 
 class Msvm_VirtualSystemGlobalSettingData
     string   Caption
@@ -1048,8 +1049,45 @@ end
 
 class Msvm_Keyboard_2012
     string   InstanceID
+    string   ElementName
+    uint16   ResourceType
+    string   OtherResourceType
+    string   ResourceSubType
+    string   PoolID
+    uint16   ConsumerVisibility
+    string   HostResource[]
+    string   AllocationUnits
+    uint64   VirtualQuantity
+    uint64   Reservation
+    uint64   Limit
+    uint32   Weight
+    boolean  AutomaticAllocation
+    boolean  AutomaticDeallocation
+    string   Parent
+    string   Connection[]
+    string   Address
+    uint16   MappingBehavior
+    string   VirtualSystemIdentifiers[]
+end
+
+
+class Msvm_AllocationCapabilities
     string   Caption
     string   Description
+    string   ElementName
+    string   InstanceID
+    string   OtherResourceType
+    uint16   RequestTypesSupported
+    string   ResourceSubType
+    uint16   ResourceType
+    uint16   SharingMode
+    uint16   SupportedAddStates[]
+    uint16   SupportedRemoveStates[]
+end
+
+
+class Msvm_SwitchPort
+    string   Caption
     string   ElementName
     datetime InstallDate
     string   Name
@@ -1152,3 +1190,19 @@ class Msvm_DiskDrive
     uint32   DriveNumber
 end
 
+
+class Msvm_VirtualHardDiskSettingData
+    string   InstanceID
+    string   Caption
+    string   Description
+    string   ElementName
+    uint16   Type
+    uint16   Format
+    string   Path
+    string   ParentPath
+    uint64   MaxInternalSize
+    uint32   BlockSize
+    uint32   LogicalSectorSize
+    uint32   PhysicalSectorSize
+    string   VirtualDiskId
+end
