@@ -597,3 +597,39 @@ hypervDomainShutdown2012(virDomainPtr dom)
 {
     return hypervDomainShutdownFlags2012(dom, 0);
 }
+
+int
+hypervDomainDestroyFlags2012(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    bool in_transition = false;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    if (!hypervIsMsvmComputerSystemActive2012(computerSystem, &in_transition) ||
+        in_transition) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Domain is not active or is in state transition"));
+        goto cleanup;
+    }
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange2012
+               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
+
+
+int
+hypervDomainDestroy2012(virDomainPtr domain)
+{
+    return hypervDomainDestroyFlags2012(domain, 0);
+}
