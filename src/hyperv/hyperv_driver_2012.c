@@ -887,3 +887,160 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
     return xml;
 }
 
+int
+hypervConnectNumOfDomains2012(virConnectPtr conn)
+{
+    bool success = false;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystemList = NULL;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    int count = 0;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_ACTIVE);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
+    }
+
+    for (computerSystem = computerSystemList; computerSystem != NULL;
+         computerSystem = computerSystem->next) {
+        ++count;
+    }
+
+    success = true;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystemList);
+
+    return success ? count : -1;
+}
+
+
+int
+hypervConnectListDomains2012(virConnectPtr conn, int *ids, int maxids)
+{
+    bool success = false;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystemList = NULL;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    int count = 0;
+
+    if (maxids == 0)
+        return 0;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_ACTIVE);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
+    }
+
+    for (computerSystem = computerSystemList; computerSystem != NULL;
+         computerSystem = computerSystem->next) {
+        ids[count++] = computerSystem->data->ProcessID;
+
+        if (count >= maxids)
+            break;
+    }
+
+    success = true;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystemList);
+    return success ? count : -1;
+}
+
+
+int
+hypervConnectNumOfDefinedDomains2012(virConnectPtr conn)
+{
+    bool success = false;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystemList = NULL;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    int count = 0;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_INACTIVE);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
+    }
+
+    for (computerSystem = computerSystemList; computerSystem != NULL;
+         computerSystem = computerSystem->next) {
+        ++count;
+    }
+
+    success = true;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystemList);
+    return success ? count : -1;
+}
+
+int
+hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, int maxnames)
+{
+    bool success = false;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystemList = NULL;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    int count = 0;
+    size_t i;
+
+    if (maxnames == 0)
+        return 0;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_INACTIVE);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
+    }
+
+    for (computerSystem = computerSystemList; computerSystem != NULL;
+         computerSystem = computerSystem->next) {
+        if (VIR_STRDUP(names[count], computerSystem->data->ElementName) < 0)
+            goto cleanup;
+
+        ++count;
+
+        if (count >= maxnames)
+            break;
+    }
+
+    success = true;
+
+ cleanup:
+    if (!success) {
+        for (i = 0; i < count; ++i)
+            VIR_FREE(names[i]);
+
+        count = -1;
+    }
+
+    hypervFreeObject(priv, (hypervObject *)computerSystemList);
+    return count;
+}
