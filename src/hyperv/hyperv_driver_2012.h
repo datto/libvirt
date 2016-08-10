@@ -52,4 +52,13 @@ int
 hypervDomainGetState2012(virDomainPtr domain, int *state, int *reason,
                      unsigned int flags);
 
+int
+hypervDomainCreate2012(virDomainPtr domain);
+
+int
+hypervDomainCreateWithFlags2012(virDomainPtr domain, unsigned int flags);
+
+virDomainPtr
+hypervDomainLookupByName2012(virConnectPtr conn, const char *name);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */

@@ -297,3 +297,207 @@ hypervConnectListAllDomains2012(virConnectPtr conn,
 }
 
 #undef MATCH
+
+virDomainPtr
+hypervDomainLookupByName2012(virConnectPtr conn, const char *name)
+{
+    virDomainPtr domain = NULL;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and ElementName = \"%s\"", name);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query, &computerSystem) < 0)
+        goto cleanup;
+
+    if (computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("No domain with name %s"), name);
+        goto cleanup;
+    }
+
+    hypervMsvmComputerSystemToDomain2012(conn, computerSystem, &domain);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return domain;
+}
+
+static int
+hypervInvokeMsvmComputerSystemRequestStateChange2012(virDomainPtr domain,
+                                                 int requestedState)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    WsXmlDocH response = NULL;
+    client_opt_t *options = NULL;
+    char *selector = NULL;
+    char *properties = NULL;
+    char *returnValue = NULL;
+    int returnCode;
+    char *instanceID = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ConcreteJob_2012 *concreteJob = NULL;
+    bool completed = false;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (virAsprintf(&selector, "Name=%s&CreationClassName=Msvm_ComputerSystem",
+                    uuid_string) < 0 ||
+        virAsprintf(&properties, "RequestedState=%d", requestedState) < 0)
+        goto cleanup;
+
+    options = wsmc_options_init();
+
+    if (options == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not initialize options"));
+        goto cleanup;
+    }
+
+    wsmc_add_selectors_from_str(options, selector);
+    wsmc_add_prop_from_str(options, properties);
+
+    /* Invoke method */
+    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_2012_RESOURCE_URI,
+                                  options, "RequestStateChange", NULL);
+
+    if (hyperyVerifyResponse(priv->client, response, "invocation") < 0)
+        goto cleanup;
+
+    /* Check return value */
+    returnValue = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:ReturnValue");
+
+    if (returnValue == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for %s invocation"),
+                       "ReturnValue", "RequestStateChange");
+        goto cleanup;
+    }
+
+    if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse return code from '%s'"), returnValue);
+        goto cleanup;
+    }
+
+    if (returnCode == CIM_RETURNCODE_TRANSITION_STARTED) {
+        /* Get concrete job object */
+        instanceID = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:Job/a:ReferenceParameters/w:SelectorSet/w:Selector[@Name='InstanceID']");
+
+        if (instanceID == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not lookup %s for %s invocation"),
+                           "InstanceID", "RequestStateChange");
+            goto cleanup;
+        }
+
+        /* FIXME: Poll every 100ms until the job completes or fails. There
+         *        seems to be no other way than polling. */
+        while (!completed) {
+            virBufferAddLit(&query, MSVM_CONCRETEJOB_2012_WQL_SELECT);
+            virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+
+            if (hypervGetMsvmConcreteJob2012List(priv, &query, &concreteJob) < 0)
+                goto cleanup;
+
+            if (concreteJob == NULL) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Could not lookup %s for %s invocation"),
+                               "Msvm_ConcreteJob", "RequestStateChange");
+                goto cleanup;
+            }
+
+            switch (concreteJob->data->JobState) {
+              case MSVM_CONCRETEJOB_JOBSTATE_NEW:
+              case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
+              case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
+              case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
+                hypervFreeObject(priv, (hypervObject *)concreteJob);
+                concreteJob = NULL;
+
+                usleep(100 * 1000);
+                continue;
+
+              case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:
+                completed = true;
+                break;
+
+              case MSVM_CONCRETEJOB_JOBSTATE_TERMINATED:
+              case MSVM_CONCRETEJOB_JOBSTATE_KILLED:
+              case MSVM_CONCRETEJOB_JOBSTATE_EXCEPTION:
+              case MSVM_CONCRETEJOB_JOBSTATE_SERVICE:
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Concrete job for %s invocation is in error state"),
+                               "RequestStateChange");
+                goto cleanup;
+
+              default:
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Concrete job for %s invocation is in unknown state"),
+                               "RequestStateChange");
+                goto cleanup;
+            }
+        }
+    } else if (returnCode != CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Invocation of %s returned an error: %s (%d)"),
+                       "RequestStateChange", hypervReturnCodeToString(returnCode),
+                       returnCode);
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    if (options != NULL)
+        wsmc_options_destroy(options);
+
+    ws_xml_destroy_doc(response);
+    VIR_FREE(selector);
+    VIR_FREE(properties);
+    VIR_FREE(returnValue);
+    VIR_FREE(instanceID);
+    hypervFreeObject(priv, (hypervObject *)concreteJob);
+
+    return result;
+}
+
+int
+hypervDomainCreateWithFlags2012(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    if (hypervIsMsvmComputerSystemActive2012(computerSystem, NULL)) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Domain is already active or is in state transition"));
+        goto cleanup;
+    }
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange2012
+               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
+
+int
+hypervDomainCreate2012(virDomainPtr domain)
+{
+    return hypervDomainCreateWithFlags2012(domain, 0);
+}

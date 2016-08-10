@@ -87,8 +87,6 @@ class Msvm_ComputerSystem_2012
     uint16   AssignedNumaNodeList[]
 end
 
-
-
 class Msvm_ConcreteJob
     string   Caption
     string   Description
@@ -128,6 +126,49 @@ class Msvm_ConcreteJob
     boolean  Cancellable
 end
 
+class Msvm_ConcreteJob_2012
+    string   InstanceID
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    string   Name
+    uint16   OperationalStatus[]
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    uint16   CommunicationStatus
+    uint16   DetailedStatus
+    uint16   OperatingStatus
+    uint16   PrimaryStatus
+    string   JobStatus
+    datetime TimeSubmitted
+    datetime ScheduledStartTime
+    datetime StartTime
+    datetime ElapsedTime
+    uint32   JobRunTimes
+    uint8    RunMonth
+    sint8    RunDay
+    sint8    RunDayOfWeek
+    datetime RunStartInterval
+    uint16   LocalOrUtcTime
+    datetime UntilTime
+    string   Notify
+    string   Owner
+    uint32   Priority
+    uint16   PercentComplete
+    boolean  DeleteOnCompletion
+    uint16   ErrorCode
+    string   ErrorDescription
+    string   ErrorSummaryDescription
+    uint16   RecoveryAction
+    string   OtherRecoveryAction
+    uint16   JobState
+    datetime TimeOfLastStateChange
+    datetime TimeBeforeRemoval
+    boolean  Cancellable
+    uint16   JobType
+end
 
 class Msvm_MemorySettingData
     string   Caption

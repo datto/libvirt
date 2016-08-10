@@ -99,180 +99,6 @@ hypervNodeGetWindowsVersion(hypervPrivate *priv)
     return NULL;
 }
 
-static virDrvOpenStatus
-hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags)
-{
-    virDrvOpenStatus result = VIR_DRV_OPEN_ERROR;
-    char *plus;
-    hypervPrivate *priv = NULL;
-    char *username = NULL;
-    char *password = NULL;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_ComputerSystem_2012 *computerSystem2012 = NULL;
-    char *windowsVersion = NULL;
-    char *hypervVersion = (char *)calloc(4, sizeof(char));
-
-    virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
-
-    /* Decline if the URI is NULL or the scheme is NULL */
-    if (conn->uri == NULL || conn->uri->scheme == NULL)
-        return VIR_DRV_OPEN_DECLINED;
-
-    /* Decline if the scheme is not hyperv */
-    plus = strchr(conn->uri->scheme, '+');
-
-    if (plus == NULL) {
-        if (STRCASENEQ(conn->uri->scheme, "hyperv"))
-            return VIR_DRV_OPEN_DECLINED;
-    } else {
-        if (plus - conn->uri->scheme != 6 ||
-            STRCASENEQLEN(conn->uri->scheme, "hyperv", 6)) {
-            return VIR_DRV_OPEN_DECLINED;
-        }
-
-        virReportError(VIR_ERR_INVALID_ARG,
-                       _("Transport '%s' in URI scheme is not supported, try again "
-                         "without the transport part"), plus + 1);
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Require server part */
-    if (conn->uri->server == NULL) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("URI is missing the server part"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Require auth */
-    if (auth == NULL || auth->cb == NULL) {
-        virReportError(VIR_ERR_INVALID_ARG, "%s",
-                       _("Missing or invalid auth pointer"));
-        return VIR_DRV_OPEN_ERROR;
-    }
-
-    /* Allocate per-connection private data */
-    if (VIR_ALLOC(priv) < 0)
-        goto cleanup;
-
-    if (hypervParseUri(&priv->parsedUri, conn->uri) < 0)
-        goto cleanup;
-
-    /* Set the port dependent on the transport protocol if no port is
-     * specified. This allows us to rely on the port parameter being
-     * correctly set when building URIs later on, without the need to
-     * distinguish between the situations port == 0 and port != 0 */
-    if (conn->uri->port == 0) {
-        if (STRCASEEQ(priv->parsedUri->transport, "https")) {
-            conn->uri->port = 5986;
-        } else {
-            conn->uri->port = 5985;
-        }
-    }
-
-    /* Request credentials */
-    if (conn->uri->user != NULL) {
-        if (VIR_STRDUP(username, conn->uri->user) < 0)
-            goto cleanup;
-    } else {
-        username = virAuthGetUsername(conn, auth, "hyperv", "administrator", conn->uri->server);
-
-        if (username == NULL) {
-            virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Username request failed"));
-            goto cleanup;
-        }
-    }
-
-    password = virAuthGetPassword(conn, auth, "hyperv", username, conn->uri->server);
-
-    if (password == NULL) {
-        virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Password request failed"));
-        goto cleanup;
-    }
-
-    /* Initialize the openwsman connection */
-    priv->client = wsmc_create(conn->uri->server, conn->uri->port, "/wsman",
-                               priv->parsedUri->transport, username, password);
-
-    if (priv->client == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not create openwsman client"));
-        goto cleanup;
-    }
-
-    if (wsmc_transport_init(priv->client, NULL) != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not initialize openwsman transport"));
-        goto cleanup;
-    }
-
-    /* FIXME: Currently only basic authentication is supported  */
-    wsman_transport_set_auth_method(priv->client, "basic");
-    windowsVersion = hypervNodeGetWindowsVersion(priv);
-    if (windowsVersion == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                        _("Could not determine Windows version"));
-        goto cleanup;
-    }
-
-
-    strncpy(hypervVersion, windowsVersion, 3);
-    priv->hypervVersion = hypervVersion;
-    //virReportError(VIR_ERR_INTERNAL_ERROR, _("Windows Version: %s"), hypervVersion);
-    //goto cleanup;
-
-    /* Check if the connection can be established and if the server has the
-     * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
-     * succeeds than the connection has been established. If the returned list
-     * is empty than the server isn't a Hyper-V server. */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
-
-    if (strcmp(priv->hypervVersion, HYPERV_VERSION_2008) == 0) {
-        if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-            goto cleanup;
-    } else if (strcmp(priv->hypervVersion, HYPERV_VERSION_2012) == 0) {
-        if (hypervGetMsvmComputerSystem2012List(priv, &query, &computerSystem2012) < 0)
-            goto cleanup;
-    }
-
-
-    if (computerSystem == NULL && computerSystem2012 == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("%s is not a Hyper-V server"), conn->uri->server);
-        goto cleanup;
-    }
-
-    if (computerSystem2012 != NULL) {
-        hypervHypervisorDriver.connectListAllDomains = hypervConnectListAllDomains2012;
-        hypervHypervisorDriver.domainGetState = hypervDomainGetState2012;
-    }
-
-    /* Setup capabilities */
-    priv->caps = hypervCapsInit(priv);
-    if (priv->caps == NULL) {
-        goto cleanup;
-    }
-
-    /* Init xmlopt to parse Domain XML */
-    priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
-
-    conn->privateData = priv;
-    priv = NULL;
-    result = VIR_DRV_OPEN_SUCCESS;
-
- cleanup:
-    hypervFreePrivate(&priv);
-    VIR_FREE(username);
-    VIR_FREE(password);
-    free(hypervVersion);
-    hypervFreeObject(priv, (hypervObject *)computerSystem);
-
-    return result;
-}
-
-
 
 static int
 hypervConnectClose(virConnectPtr conn)
@@ -3324,69 +3150,244 @@ hypervDomainCreateXML(virConnectPtr conn, const char *xmlDesc, unsigned int flag
     return domain;
 }
 
+static virDrvOpenStatus
+hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags)
+{
+    virDrvOpenStatus result = VIR_DRV_OPEN_ERROR;
+    char *plus;
+    hypervPrivate *priv = NULL;
+    char *username = NULL;
+    char *password = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_2012 *computerSystem2012 = NULL;
+    char *windowsVersion = NULL;
+    char *hypervVersion = (char *)calloc(4, sizeof(char));
 
+    virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+
+    /* Decline if the URI is NULL or the scheme is NULL */
+    if (conn->uri == NULL || conn->uri->scheme == NULL)
+        return VIR_DRV_OPEN_DECLINED;
+
+    /* Decline if the scheme is not hyperv */
+    plus = strchr(conn->uri->scheme, '+');
+
+    if (plus == NULL) {
+        if (STRCASENEQ(conn->uri->scheme, "hyperv"))
+            return VIR_DRV_OPEN_DECLINED;
+    } else {
+        if (plus - conn->uri->scheme != 6 ||
+            STRCASENEQLEN(conn->uri->scheme, "hyperv", 6)) {
+            return VIR_DRV_OPEN_DECLINED;
+        }
+
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("Transport '%s' in URI scheme is not supported, try again "
+                         "without the transport part"), plus + 1);
+        return VIR_DRV_OPEN_ERROR;
+    }
+
+    /* Require server part */
+    if (conn->uri->server == NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("URI is missing the server part"));
+        return VIR_DRV_OPEN_ERROR;
+    }
+
+    /* Require auth */
+    if (auth == NULL || auth->cb == NULL) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("Missing or invalid auth pointer"));
+        return VIR_DRV_OPEN_ERROR;
+    }
+
+    /* Allocate per-connection private data */
+    if (VIR_ALLOC(priv) < 0)
+        goto cleanup;
+
+    if (hypervParseUri(&priv->parsedUri, conn->uri) < 0)
+        goto cleanup;
+
+    /* Set the port dependent on the transport protocol if no port is
+     * specified. This allows us to rely on the port parameter being
+     * correctly set when building URIs later on, without the need to
+     * distinguish between the situations port == 0 and port != 0 */
+    if (conn->uri->port == 0) {
+        if (STRCASEEQ(priv->parsedUri->transport, "https")) {
+            conn->uri->port = 5986;
+        } else {
+            conn->uri->port = 5985;
+        }
+    }
+
+    /* Request credentials */
+    if (conn->uri->user != NULL) {
+        if (VIR_STRDUP(username, conn->uri->user) < 0)
+            goto cleanup;
+    } else {
+        username = virAuthGetUsername(conn, auth, "hyperv", "administrator", conn->uri->server);
+
+        if (username == NULL) {
+            virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Username request failed"));
+            goto cleanup;
+        }
+    }
+
+    password = virAuthGetPassword(conn, auth, "hyperv", username, conn->uri->server);
+
+    if (password == NULL) {
+        virReportError(VIR_ERR_AUTH_FAILED, "%s", _("Password request failed"));
+        goto cleanup;
+    }
+
+    /* Initialize the openwsman connection */
+    priv->client = wsmc_create(conn->uri->server, conn->uri->port, "/wsman",
+                               priv->parsedUri->transport, username, password);
+
+    if (priv->client == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not create openwsman client"));
+        goto cleanup;
+    }
+
+    if (wsmc_transport_init(priv->client, NULL) != 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not initialize openwsman transport"));
+        goto cleanup;
+    }
+
+    /* FIXME: Currently only basic authentication is supported  */
+    wsman_transport_set_auth_method(priv->client, "basic");
+    windowsVersion = hypervNodeGetWindowsVersion(priv);
+    if (windowsVersion == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("Could not determine Windows version"));
+        goto cleanup;
+    }
+
+
+    strncpy(hypervVersion, windowsVersion, 3);
+    priv->hypervVersion = hypervVersion;
+    virReportError(VIR_ERR_INTERNAL_ERROR, _("Windows Version: %s"), hypervVersion);
+    //goto cleanup;
+
+    /* Check if the connection can be established and if the server has the
+     * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
+     * succeeds than the connection has been established. If the returned list
+     * is empty than the server isn't a Hyper-V server. */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+
+    if (strcmp(priv->hypervVersion, HYPERV_VERSION_2008) == 0) {
+        if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+            goto cleanup;
+    } else if (strcmp(priv->hypervVersion, HYPERV_VERSION_2012) == 0) {
+        if (hypervGetMsvmComputerSystem2012List(priv, &query, &computerSystem2012) < 0)
+            goto cleanup;
+    }
+
+
+    if (computerSystem == NULL && computerSystem2012 == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("%s is not a Hyper-V server"), conn->uri->server);
+        goto cleanup;
+    }
+
+    if (computerSystem2012 != NULL) {
+        hypervHypervisorDriver.connectListAllDomains = hypervConnectListAllDomains2012;
+        hypervHypervisorDriver.domainGetState = hypervDomainGetState2012;
+        hypervHypervisorDriver.domainCreate = hypervDomainCreate2012;
+        hypervHypervisorDriver.domainCreateWithFlags = hypervDomainCreateWithFlags2012;
+        hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName2012;
+    } else {
+        hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 0.9.5 */
+        hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 0.9.5 */
+        hypervHypervisorDriver.nodeGetInfo = hypervNodeGetInfo; /* 0.9.5 */
+        hypervHypervisorDriver.connectListDomains = hypervConnectListDomains; /* 0.9.5 */
+        hypervHypervisorDriver.connectNumOfDomains = hypervConnectNumOfDomains; /* 0.9.5 */
+        hypervHypervisorDriver.connectListAllDomains = hypervConnectListAllDomains; /* 0.10.2 */
+        hypervHypervisorDriver.domainLookupByID = hypervDomainLookupByID; /* 0.9.5 */
+        hypervHypervisorDriver.domainLookupByUUID = hypervDomainLookupByUUID; /* 0.9.5 */
+        hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName; /* 0.9.5 */
+        hypervHypervisorDriver.domainSuspend = hypervDomainSuspend; /* 0.9.5 */
+        hypervHypervisorDriver.domainResume = hypervDomainResume; /* 0.9.5 */
+        hypervHypervisorDriver.domainReboot = hypervDomainReboot; /* 1.3.x */
+        hypervHypervisorDriver.domainDestroy = hypervDomainDestroy; /* 0.9.5 */
+        hypervHypervisorDriver.domainDestroyFlags = hypervDomainDestroyFlags; /* 0.9.5 */
+        hypervHypervisorDriver.domainGetOSType = hypervDomainGetOSType; /* 0.9.5 */
+        hypervHypervisorDriver.domainGetInfo = hypervDomainGetInfo; /* 0.9.5 */
+        hypervHypervisorDriver.domainGetState = hypervDomainGetState; /* 0.9.5 */
+        hypervHypervisorDriver.domainGetXMLDesc = hypervDomainGetXMLDesc; /* 0.9.5 */
+        hypervHypervisorDriver.connectListDefinedDomains = hypervConnectListDefinedDomains; /* 0.9.5 */
+        hypervHypervisorDriver.connectNumOfDefinedDomains = hypervConnectNumOfDefinedDomains; /* 0.9.5 */
+        hypervHypervisorDriver.domainCreate = hypervDomainCreate; /* 0.9.5 */
+        hypervHypervisorDriver.domainCreateWithFlags = hypervDomainCreateWithFlags; /* 0.9.5 */
+        hypervHypervisorDriver.connectIsEncrypted = hypervConnectIsEncrypted; /* 0.9.5 */
+        hypervHypervisorDriver.connectIsSecure = hypervConnectIsSecure; /* 0.9.5 */
+        hypervHypervisorDriver.domainIsActive = hypervDomainIsActive; /* 0.9.5 */
+        hypervHypervisorDriver.domainIsPersistent = hypervDomainIsPersistent; /* 0.9.5 */
+        hypervHypervisorDriver.domainIsUpdated = hypervDomainIsUpdated; /* 0.9.5 */
+        hypervHypervisorDriver.domainManagedSave = hypervDomainManagedSave; /* 0.9.5 */
+        hypervHypervisorDriver.domainHasManagedSaveImage = hypervDomainHasManagedSaveImage; /* 0.9.5 */
+        hypervHypervisorDriver.domainManagedSaveRemove = hypervDomainManagedSaveRemove; /* 0.9.5 */
+        hypervHypervisorDriver.connectIsAlive = hypervConnectIsAlive; /* 0.9.8 */
+        hypervHypervisorDriver.connectGetVersion = hypervConnectGetVersion; /* 1.2.10 */
+        hypervHypervisorDriver.connectGetCapabilities = hypervConnectGetCapabilities; /* 1.2.10 */
+        hypervHypervisorDriver.connectGetMaxVcpus = hypervConnectGetMaxVcpus; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetMaxVcpus = hypervDomainGetMaxVcpus; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetVcpusFlags = hypervDomainGetVcpusFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetVcpus = hypervDomainGetVcpus; /* 1.2.10 */
+        hypervHypervisorDriver.domainSendKey = hypervDomainSendKey; /* 1.3.x */
+        hypervHypervisorDriver.nodeGetFreeMemory = hypervNodeGetFreeMemory; /* 1.2.10 */
+        hypervHypervisorDriver.domainShutdownFlags = hypervDomainShutdownFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainShutdown = hypervDomainShutdown; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetSchedulerParametersFlags = hypervDomainGetSchedulerParametersFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetSchedulerParameters = hypervDomainGetSchedulerParameters; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetSchedulerType = hypervDomainGetSchedulerType; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetAutostart = hypervDomainSetAutostart; /* 1.2.10 */
+        hypervHypervisorDriver.domainGetAutostart = hypervDomainGetAutostart; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetMaxMemory = hypervDomainSetMaxMemory; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetMemory = hypervDomainSetMemory; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetMemoryFlags = hypervDomainSetMemoryFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetVcpus = hypervDomainSetVcpus; /* 1.2.10 */
+        hypervHypervisorDriver.domainSetVcpusFlags = hypervDomainSetVcpusFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainUndefine = hypervDomainUndefine; /* 1.2.10 */
+        hypervHypervisorDriver.domainUndefineFlags = hypervDomainUndefineFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainAttachDevice = hypervDomainAttachDevice; /* 1.2.10 */
+        hypervHypervisorDriver.domainAttachDeviceFlags = hypervDomainAttachDeviceFlags; /* 1.2.10 */
+        hypervHypervisorDriver.domainDefineXML = hypervDomainDefineXML; /* 1.2.10 */
+        hypervHypervisorDriver.domainCreateXML = hypervDomainCreateXML; /* 1.2.10 */
+    }
+
+    /* Setup capabilities */
+    priv->caps = hypervCapsInit(priv);
+    if (priv->caps == NULL) {
+        goto cleanup;
+    }
+
+    /* Init xmlopt to parse Domain XML */
+    priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
+
+    conn->privateData = priv;
+    priv = NULL;
+    result = VIR_DRV_OPEN_SUCCESS;
+
+ cleanup:
+    hypervFreePrivate(&priv);
+    VIR_FREE(username);
+    VIR_FREE(password);
+    free(hypervVersion);
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
 
 static virHypervisorDriver hypervHypervisorDriver = {
     .name = "Hyper-V",
     .connectOpen = hypervConnectOpen, /* 0.9.5 */
     .connectClose = hypervConnectClose, /* 0.9.5 */
-    .connectGetType = hypervConnectGetType, /* 0.9.5 */
-    .connectGetHostname = hypervConnectGetHostname, /* 0.9.5 */
-    .nodeGetInfo = hypervNodeGetInfo, /* 0.9.5 */
-    .connectListDomains = hypervConnectListDomains, /* 0.9.5 */
-    .connectNumOfDomains = hypervConnectNumOfDomains, /* 0.9.5 */
-    .connectListAllDomains = hypervConnectListAllDomains, /* 0.10.2 */
-    .domainLookupByID = hypervDomainLookupByID, /* 0.9.5 */
-    .domainLookupByUUID = hypervDomainLookupByUUID, /* 0.9.5 */
-    .domainLookupByName = hypervDomainLookupByName, /* 0.9.5 */
-    .domainSuspend = hypervDomainSuspend, /* 0.9.5 */
-    .domainResume = hypervDomainResume, /* 0.9.5 */
-    .domainReboot = hypervDomainReboot, /* 1.3.x */
-    .domainDestroy = hypervDomainDestroy, /* 0.9.5 */
-    .domainDestroyFlags = hypervDomainDestroyFlags, /* 0.9.5 */
-    .domainGetOSType = hypervDomainGetOSType, /* 0.9.5 */
-    .domainGetInfo = hypervDomainGetInfo, /* 0.9.5 */
-    .domainGetState = hypervDomainGetState, /* 0.9.5 */
-    .domainGetXMLDesc = hypervDomainGetXMLDesc, /* 0.9.5 */
-    .connectListDefinedDomains = hypervConnectListDefinedDomains, /* 0.9.5 */
-    .connectNumOfDefinedDomains = hypervConnectNumOfDefinedDomains, /* 0.9.5 */
-    .domainCreate = hypervDomainCreate, /* 0.9.5 */
-    .domainCreateWithFlags = hypervDomainCreateWithFlags, /* 0.9.5 */
-    .connectIsEncrypted = hypervConnectIsEncrypted, /* 0.9.5 */
-    .connectIsSecure = hypervConnectIsSecure, /* 0.9.5 */
-    .domainIsActive = hypervDomainIsActive, /* 0.9.5 */
-    .domainIsPersistent = hypervDomainIsPersistent, /* 0.9.5 */
-    .domainIsUpdated = hypervDomainIsUpdated, /* 0.9.5 */
-    .domainManagedSave = hypervDomainManagedSave, /* 0.9.5 */
-    .domainHasManagedSaveImage = hypervDomainHasManagedSaveImage, /* 0.9.5 */
-    .domainManagedSaveRemove = hypervDomainManagedSaveRemove, /* 0.9.5 */
-    .connectIsAlive = hypervConnectIsAlive, /* 0.9.8 */
-    .connectGetVersion = hypervConnectGetVersion, /* 1.2.10 */
-    .connectGetCapabilities = hypervConnectGetCapabilities, /* 1.2.10 */
-    .connectGetMaxVcpus = hypervConnectGetMaxVcpus, /* 1.2.10 */
-    .domainGetMaxVcpus = hypervDomainGetMaxVcpus, /* 1.2.10 */
-    .domainGetVcpusFlags = hypervDomainGetVcpusFlags, /* 1.2.10 */
-    .domainGetVcpus = hypervDomainGetVcpus, /* 1.2.10 */
-    .domainSendKey = hypervDomainSendKey, /* 1.3.x */
-    .nodeGetFreeMemory = hypervNodeGetFreeMemory, /* 1.2.10 */
-    .domainShutdownFlags = hypervDomainShutdownFlags, /* 1.2.10 */
-    .domainShutdown = hypervDomainShutdown, /* 1.2.10 */
-    .domainGetSchedulerParametersFlags = hypervDomainGetSchedulerParametersFlags, /* 1.2.10 */
-    .domainGetSchedulerParameters = hypervDomainGetSchedulerParameters, /* 1.2.10 */
-    .domainGetSchedulerType = hypervDomainGetSchedulerType, /* 1.2.10 */
-    .domainSetAutostart = hypervDomainSetAutostart, /* 1.2.10 */
-    .domainGetAutostart = hypervDomainGetAutostart, /* 1.2.10 */
-    .domainSetMaxMemory = hypervDomainSetMaxMemory, /* 1.2.10 */
-    .domainSetMemory = hypervDomainSetMemory, /* 1.2.10 */
-    .domainSetMemoryFlags = hypervDomainSetMemoryFlags, /* 1.2.10 */
-    .domainSetVcpus = hypervDomainSetVcpus, /* 1.2.10 */
-    .domainSetVcpusFlags = hypervDomainSetVcpusFlags, /* 1.2.10 */
-    .domainUndefine = hypervDomainUndefine, /* 1.2.10 */
-    .domainUndefineFlags = hypervDomainUndefineFlags, /* 1.2.10 */
-    .domainAttachDevice = hypervDomainAttachDevice, /* 1.2.10 */
-    .domainAttachDeviceFlags = hypervDomainAttachDeviceFlags, /* 1.2.10 */
-    .domainDefineXML = hypervDomainDefineXML, /* 1.2.10 */
-    .domainCreateXML = hypervDomainCreateXML, /* 1.2.10 */
 };
 
 /* Retrieves host system UUID  */
@@ -3469,10 +3470,6 @@ static virCapsPtr hypervCapsInit(hypervPrivate *priv)
     virObjectUnref(caps);
     return NULL;
 }
-
-
-
-
 
 
 static void
