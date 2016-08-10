@@ -59,6 +59,12 @@ int
 hypervDomainCreateWithFlags2012(virDomainPtr domain, unsigned int flags);
 
 virDomainPtr
+hypervDomainLookupByID2012(virConnectPtr conn, int id);
+
+virDomainPtr
+hypervDomainLookupByUUID2012(virConnectPtr conn, const unsigned char *uuid);
+
+virDomainPtr
 hypervDomainLookupByName2012(virConnectPtr conn, const char *name);
 
 #endif /* __HYPERV_DRIVER_2012_H__ */

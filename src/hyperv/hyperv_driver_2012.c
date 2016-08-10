@@ -299,6 +299,68 @@ hypervConnectListAllDomains2012(virConnectPtr conn,
 #undef MATCH
 
 virDomainPtr
+hypervDomainLookupByID2012(virConnectPtr conn, int id)
+{
+    virDomainPtr domain = NULL;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and ProcessID = %d", id);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query, &computerSystem) < 0)
+        goto cleanup;
+
+    if (computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN, _("No domain with ID %d"), id);
+        goto cleanup;
+    }
+
+    hypervMsvmComputerSystemToDomain2012(conn, computerSystem, &domain);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return domain;
+}
+
+virDomainPtr
+hypervDomainLookupByUUID2012(virConnectPtr conn, const unsigned char *uuid)
+{
+    virDomainPtr domain = NULL;
+    hypervPrivate *priv = conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virUUIDFormat(uuid, uuid_string);
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
+
+    if (hypervGetMsvmComputerSystem2012List(priv, &query, &computerSystem) < 0)
+        goto cleanup;
+
+    if (computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("No domain with UUID %s"), uuid_string);
+        goto cleanup;
+    }
+
+    hypervMsvmComputerSystemToDomain2012(conn, computerSystem, &domain);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return domain;
+}
+
+virDomainPtr
 hypervDomainLookupByName2012(virConnectPtr conn, const char *name)
 {
     virDomainPtr domain = NULL;
