@@ -509,8 +509,6 @@ hypervDomainReboot(virDomainPtr domain, unsigned int flags)
     return result;
 }
 
-
-
 static int
 hypervDomainDestroyFlags(virDomainPtr domain, unsigned int flags)
 {
@@ -547,8 +545,6 @@ hypervDomainDestroy(virDomainPtr domain)
 {
     return hypervDomainDestroyFlags(domain, 0);
 }
-
-
 
 static char *
 hypervDomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED)
@@ -3305,6 +3301,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName2012;
         hypervHypervisorDriver.domainShutdownFlags = hypervDomainShutdownFlags2012;
         hypervHypervisorDriver.domainShutdown = hypervDomainShutdown2012;       
+        hypervHypervisorDriver.domainDestroy = hypervDomainDestroy2012;
+        hypervHypervisorDriver.domainDestroyFlags = hypervDomainDestroyFlags2012;
     } else {
         hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 0.9.5 */
         hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 0.9.5 */
