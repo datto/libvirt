@@ -45,6 +45,13 @@
 # define MSVM_COMPUTERSYSTEM_WQL_INACTIVE \
     "(EnabledState = 0 or EnabledState = 3 or EnabledState = 32769) "
 
+# define MSVM_COMPUTERSYSTEM_2012_WQL_ACTIVE \
+    "(EnabledState != 0 and EnabledState != 3) "
+
+# define MSVM_COMPUTERSYSTEM_2012_WQL_INACTIVE \
+    "(EnabledState = 0 or EnabledState = 3) "
+
+/* https://msdn.microsoft.com/en-us/library/cc136822(v=vs.85).aspx */
 enum _Msvm_ComputerSystem_EnabledState {
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN = 0,          /* inactive */
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED = 2,          /*   active */
@@ -57,6 +64,21 @@ enum _Msvm_ComputerSystem_EnabledState {
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING = 32774,     /*   active */
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING = 32776,      /*   active */
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING = 32777      /*   active */
+};
+
+/* https://msdn.microsoft.com/en-us/library/hh850116(v=vs.85).aspx */
+enum _Msvm_ComputerSystem_2012_EnabledState {
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_UNKNOWN = 0,             /* inactive */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_OTHER = 1,               /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED = 2,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DISABLED = 3,            /* inactive */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_SHUTTING_DOWN = 4,       /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_NOT_APPLICABLE = 5,      /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED_BUT_OFFLINE = 6, /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_IN_TEST = 7,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DEFERRED = 8,            /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_QUIESCE = 9,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_STARTING = 10,           /*   active */
 };
 
 /* https://msdn.microsoft.com/en-us/library/cc723874(v=vs.85).aspx */

@@ -91,4 +91,7 @@ hypervDomainUndefineFlags2012(virDomainPtr domain, unsigned int flags ATTRIBUTE_
 int
 hypervDomainUndefine2012(virDomainPtr domain);
 
+char *
+hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */

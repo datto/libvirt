@@ -77,32 +77,25 @@ hypervIsMsvmComputerSystemActive2012(Msvm_ComputerSystem_2012 *computerSystem,
         *in_transition = false;
 
     switch (computerSystem->data->EnabledState) {
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
-        return false;
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_UNKNOWN:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DISABLED:
+            return false;
 
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED:
-        return true;
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_SHUTTING_DOWN:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_STARTING:
+            if (in_transition != NULL)
+                *in_transition = true;
+            return true;
 
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED:
-        return false;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED:
-        return true;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED: /* managed save */
-        return false;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STARTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SNAPSHOTTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SAVING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING:
-        if (in_transition != NULL)
-            *in_transition = true;
-
-        return true;
-
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_OTHER:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_NOT_APPLICABLE:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED_BUT_OFFLINE:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_IN_TEST:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DEFERRED:
+        case MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_QUIESCE:
+            return true;
+    
       default:
         return false;
     }
@@ -739,3 +732,158 @@ hypervDomainUndefine2012(virDomainPtr domain)
 {
     return hypervDomainUndefineFlags2012(domain, 0);
 }
+
+char *
+hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
+{
+    int i;
+    char *xml = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+    virDomainDefPtr def = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char **notesArr;
+    char **noteStrPtr;
+    const char *notesDelim = "\n";
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData_2012 *virtualSystemSettingData = NULL;
+    Msvm_ProcessorSettingData_2012 *processorSettingData = NULL;
+    Msvm_MemorySettingData_2012 *memorySettingData = NULL;
+    // Msvm_VirtualHardDiskSettingData_2012 *hardDiskSettingData = NULL;
+
+    /* Flags checked by virDomainDefFormat */
+
+    if (!(def = virDomainDefNew()))
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Get Msvm_ComputerSystem */
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+
+    if (hypervGetMsvmVirtualSystemSettingData2012List(priv, &query,
+                                                  &virtualSystemSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (virtualSystemSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_VirtualSystemSettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_ProcessorSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ProcessorSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    if (hypervGetMsvmProcessorSettingData2012List(priv, &query,
+                                              &processorSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_ProcessorSettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_MemorySettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_MemorySettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    if (hypervGetMsvmMemorySettingData2012List(priv, &query,
+                                           &memorySettingData) < 0) {
+        goto cleanup;
+    }
+
+
+    if (memorySettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_MemorySettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Fill struct */
+    def->virtType = VIR_DOMAIN_VIRT_HYPERV;
+
+    if (hypervIsMsvmComputerSystemActive2012(computerSystem, NULL)) {
+        def->id = computerSystem->data->ProcessID;
+    } else {
+        def->id = -1;
+    }
+
+    if (virUUIDParse(computerSystem->data->Name, def->uuid) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse UUID from string '%s'"),
+                       computerSystem->data->Name);
+        return NULL;
+    }
+
+    if (VIR_STRDUP(def->name, computerSystem->data->ElementName) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(notesArr, virtualSystemSettingData->data->Notes.count + 1) < 0) {
+        goto cleanup;
+    }
+    
+    noteStrPtr = virtualSystemSettingData->data->Notes.data;
+    
+    for (i = 0; i < virtualSystemSettingData->data->Notes.count; i++) {
+        notesArr[i] = *noteStrPtr++;
+    }
+    
+    if (VIR_STRDUP(def->description, virStringJoin(notesArr, notesDelim)) < 0)
+        goto cleanup;
+
+    virDomainDefSetMemoryTotal(def, memorySettingData->data->Limit * 1024); /* megabyte to kilobyte */
+    def->mem.cur_balloon = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
+
+    if (virDomainDefSetVcpusMax(def,
+                                processorSettingData->data->VirtualQuantity) < 0)
+        goto cleanup;
+
+    if (virDomainDefSetVcpus(def,
+                             processorSettingData->data->VirtualQuantity) < 0)
+        goto cleanup;
+
+    def->os.type = VIR_DOMAIN_OSTYPE_HVM;
+
+    /* FIXME: devices section is totally missing */
+
+    xml = virDomainDefFormat(def,
+                             virDomainDefFormatConvertXMLFlags(flags));
+
+ cleanup:
+    virDomainDefFree(def);
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+    hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
+    hypervFreeObject(priv, (hypervObject *)processorSettingData);
+    hypervFreeObject(priv, (hypervObject *)memorySettingData);
+
+    return xml;
+}
+

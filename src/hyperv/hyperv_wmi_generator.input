@@ -199,6 +199,36 @@ class Msvm_MemorySettingData
 #    uint32   TargetMemoryBuffer # Available only on Windows Server 2008 R2 SP1
 end
 
+class Msvm_MemorySettingData_2012
+    string  InstanceID
+    string  Caption
+    string  Description
+    string  ElementName
+    uint16  ResourceType
+    string  OtherResourceType
+    string  ResourceSubType
+    string  PoolID
+    uint16  ConsumerVisibility
+    string  HostResource[]
+    string  AllocationUnits
+    uint64  VirtualQuantity
+    uint64  Reservation
+    uint64  Limit
+    uint32  Weight
+    boolean AutomaticAllocation
+    boolean AutomaticDeallocation
+    string  Parent
+    string  Connection[]
+    string  Address
+    uint16  MappingBehavior
+    string  AddressOnParent
+    string  VirtualQuantityUnits
+    boolean DynamicMemoryEnabled
+    uint32  TargetMemoryBuffer
+    boolean IsVirtualized
+    boolean SwapFilesInUse
+    uint64  MaxMemoryBlocksPerNumaNode
+end
 
 class Msvm_ProcessorSettingData
     string   Caption
@@ -232,6 +262,35 @@ class Msvm_ProcessorSettingData
     boolean  LimitProcessorFeatures
 end
 
+class Msvm_ProcessorSettingData_2012
+    string  InstanceID
+    string  Caption
+    string  Description
+    string  ElementName
+    uint16  ResourceType
+    string  OtherResourceType
+    string  ResourceSubType
+    string  PoolID
+    uint16  ConsumerVisibility
+    string  HostResource[]
+    string  AllocationUnits
+    uint64  VirtualQuantity
+    uint64  Reservation
+    uint64  Limit
+    uint32  Weight
+    boolean AutomaticAllocation
+    boolean AutomaticDeallocation
+    string  Parent
+    string  Connection[]
+    string  Address
+    uint16  MappingBehavior
+    string  AddressOnParent
+    string  VirtualQuantityUnits
+    boolean LimitCPUID
+    boolean LimitProcessorFeatures
+    uint64  MaxProcessorsPerNumaNode
+    uint64  MaxNumaNodesPerSocket
+end
 
 class Msvm_VirtualSystemSettingData
     string   Caption
@@ -257,6 +316,53 @@ class Msvm_VirtualSystemSettingData
     boolean  NumaNodesAreRequired
 end
 
+class Msvm_VirtualSystemSettingData_2012
+    string   InstanceID
+    string   Caption
+    string   Description
+    string   ElementName
+    string   VirtualSystemIdentifier
+    string   VirtualSystemType
+    string   Notes[]
+    datetime CreationTime
+    string   ConfigurationID
+    string   ConfigurationDataRoot
+    string   ConfigurationFile
+    string   SnapshotDataRoot
+    string   SuspendDataRoot
+    string   SwapFileDataRoot
+    string   LogDataRoot
+    uint16   AutomaticStartupAction
+    datetime AutomaticStartupActionDelay
+    uint16   AutomaticStartupActionSequenceNumber
+    uint16   AutomaticShutdownAction
+    uint16   AutomaticRecoveryAction
+    string   RecoveryFile
+    string   BIOSGUID
+    string   BIOSSerialNumber
+    string   BaseBoardSerialNumber
+    string   ChassisSerialNumber
+    string   ChassisAssetTag
+    boolean  BIOSNumLock
+    uint16   BootOrder[]
+    string   Parent
+    boolean  IsSaved
+    string   AdditionalRecoveryInformation
+    boolean  AllowFullSCSICommandSet
+    uint32   DebugChannelId
+    uint16   DebugPortEnabled
+    uint32   DebugPort
+    string   Version
+    boolean  IncrementalBackupEnabled
+    boolean  VirtualNumaEnabled
+    boolean  AllowReducedFcRedundancy
+    string   VirtualSystemSubType
+    string   BootSourceOrder[]
+    boolean  PauseAfterBootFailure
+    uint16   NetworkBootPreferredProtocol
+    boolean  SecureBootEnabled
+    uint64   LowMmioGapSize
+end
 
 class Win32_ComputerSystem
     uint16   AdminPasswordStatus
@@ -819,7 +925,6 @@ class Msvm_SwitchPort
 	boolean AllowMacSpoofing
 end
 
-
 class Msvm_SyntheticEthernetPortSettingData
 	string Caption
 	string Description
@@ -846,7 +951,6 @@ class Msvm_SyntheticEthernetPortSettingData
 	boolean StaticMacAddress
 end
 
-
 class Msvm_VirtualSwitchManagementService
 	string Caption
 	string Description
@@ -872,6 +976,22 @@ class Msvm_VirtualSwitchManagementService
 end
 
 class Msvm_VirtualHardDiskSettingData
+    string InstanceID
+    string Caption
+    string Description
+    string ElementName
+    uint16 Type
+    uint16 Format
+    string Path
+    string ParentPath
+    uint64 MaxInternalSize
+    uint32 BlockSize
+    uint32 LogicalSectorSize
+    uint32 PhysicalSectorSize
+    string VirtualDiskId
+end
+
+class Msvm_VirtualHardDiskSettingData_2012
     string InstanceID
     string Caption
     string Description

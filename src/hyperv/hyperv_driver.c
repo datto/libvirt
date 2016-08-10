@@ -3302,6 +3302,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainIsActive = hypervDomainIsActive2012;
         hypervHypervisorDriver.domainUndefine = hypervDomainUndefine2012;
         hypervHypervisorDriver.domainUndefineFlags = hypervDomainUndefineFlags2012;
+        hypervHypervisorDriver.domainGetXMLDesc = hypervDomainGetXMLDesc2012;
     } else {
         hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 0.9.5 */
         hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 0.9.5 */
