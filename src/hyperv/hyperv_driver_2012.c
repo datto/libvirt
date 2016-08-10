@@ -550,7 +550,7 @@ hypervDomainCreateWithFlags2012(virDomainPtr domain, unsigned int flags)
     }
 
     result = hypervInvokeMsvmComputerSystemRequestStateChange2012
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+               (domain, MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RUNNING);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -585,7 +585,7 @@ hypervDomainShutdownFlags2012(virDomainPtr domain, unsigned int flags)
     }
 
     result = hypervInvokeMsvmComputerSystemRequestStateChange2012
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+               (domain, MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_OFF);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *) computerSystem);
@@ -619,7 +619,7 @@ hypervDomainDestroyFlags2012(virDomainPtr domain, unsigned int flags)
     }
 
     result = hypervInvokeMsvmComputerSystemRequestStateChange2012
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+               (domain, MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_OFF);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -633,3 +633,25 @@ hypervDomainDestroy2012(virDomainPtr domain)
 {
     return hypervDomainDestroyFlags2012(domain, 0);
 }
+
+int
+hypervDomainReboot2012(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange2012
+               (domain, MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RESET);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
+
