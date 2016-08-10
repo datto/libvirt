@@ -40,8 +40,6 @@
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
-
-
 /* This function guarantees that query is freed, even on failure */
 int
 hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
@@ -893,6 +891,8 @@ hypervInvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     client_opt_t *options = NULL;
     WsXmlDocH response = NULL;
     Msvm_ConcreteJob *concreteJob = NULL;
+    Msvm_ConcreteJob_2012 *concreteJob2012 = NULL;
+    int concreteJobState = -1;
     bool completed = false;
 
     options = wsmc_options_init();
@@ -938,7 +938,7 @@ hypervInvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     }
 
     if (returnCode == CIM_RETURNCODE_TRANSITION_STARTED) {
-        virBufferAsprintf(&xpath_expr_buff, "/s:Envelope/s:Body/p:%s_OUTPUT/p:Job/a:ReferenceParameters/w:SelectorSet/w:Selector[ Name='InstanceID']", methodName);
+        virBufferAsprintf(&xpath_expr_buff, "/s:Envelope/s:Body/p:%s_OUTPUT/p:Job/a:ReferenceParameters/w:SelectorSet/w:Selector[@Name='InstanceID']", methodName);
         xpath_expr_string = virBufferContentAndReset(&xpath_expr_buff);
         if (xpath_expr_string == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -959,26 +959,42 @@ hypervInvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
         /* FIXME: Poll every 100ms until the job completes or fails.
          *        There seems to be no other way than polling. */
         while (!completed) {
-            virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
-            virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+            if (strcmp(priv->hypervVersion, HYPERV_VERSION_2008) == 0) {
+                virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
+                virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
 
-            if (hypervGetMsvmConcreteJobList(priv, &query, &concreteJob) < 0) {
-                goto cleanup;
+                if (hypervGetMsvmConcreteJobList(priv, &query, &concreteJob) < 0) {
+                    goto cleanup;
+                }
+
+                concreteJobState = concreteJob->data->JobState;
+            } else if (strcmp(priv->hypervVersion, HYPERV_VERSION_2012) == 0) {
+                virBufferAddLit(&query, MSVM_CONCRETEJOB_2012_WQL_SELECT);
+                virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+
+                if (hypervGetMsvmConcreteJob2012List(priv, &query, &concreteJob2012) < 0) {
+                    goto cleanup;
+                }
+
+                concreteJobState = concreteJob2012->data->JobState;
             }
-            if (concreteJob == NULL) {
+
+            if (concreteJob == NULL && concreteJob2012 == NULL) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Could not lookup %s for %s invocation"),
                                "Msvm_ConcreteJob", "RequestStateChange");
                 goto cleanup;
             }
 
-            switch (concreteJob->data->JobState) {
+            switch (concreteJobState) {
                 case MSVM_CONCRETEJOB_JOBSTATE_NEW:
                 case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
                 case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
                 case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
                     hypervFreeObject(priv, (hypervObject *) concreteJob);
+                    hypervFreeObject(priv, (hypervObject *) concreteJob2012);
                     concreteJob = NULL;
+                    concreteJob2012 = NULL;
                     usleep(100 * 1000);  /* Wait 100 ms */
                     continue;
 
@@ -1019,6 +1035,7 @@ hypervInvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     VIR_FREE(instanceID);
     VIR_FREE(xpath_expr_string);
     hypervFreeObject(priv, (hypervObject *) concreteJob);
+    hypervFreeObject(priv, (hypervObject *) concreteJob2012);
     virBufferFreeAndReset(&query);
     virBufferFreeAndReset(&xpath_expr_buff);
 

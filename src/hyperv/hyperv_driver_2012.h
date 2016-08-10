@@ -82,4 +82,13 @@ hypervDomainDestroy2012(virDomainPtr domain);
 int
 hypervDomainReboot2012(virDomainPtr domain, unsigned int flags);
 
+int
+hypervDomainIsActive2012(virDomainPtr domain);
+
+int
+hypervDomainUndefineFlags2012(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNUSED);
+
+int
+hypervDomainUndefine2012(virDomainPtr domain);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */

@@ -3260,11 +3260,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         goto cleanup;
     }
 
-
     strncpy(hypervVersion, windowsVersion, 3);
     priv->hypervVersion = hypervVersion;
-    virReportError(VIR_ERR_INTERNAL_ERROR, _("Windows Version: %s"), hypervVersion);
-    //goto cleanup;
 
     /* Check if the connection can be established and if the server has the
      * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
@@ -3302,6 +3299,9 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainDestroy = hypervDomainDestroy2012;
         hypervHypervisorDriver.domainDestroyFlags = hypervDomainDestroyFlags2012;
         hypervHypervisorDriver.domainReboot = hypervDomainReboot2012;
+        hypervHypervisorDriver.domainIsActive = hypervDomainIsActive2012;
+        hypervHypervisorDriver.domainUndefine = hypervDomainUndefine2012;
+        hypervHypervisorDriver.domainUndefineFlags = hypervDomainUndefineFlags2012;
     } else {
         hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 0.9.5 */
         hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 0.9.5 */
@@ -3379,7 +3379,6 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
     hypervFreePrivate(&priv);
     VIR_FREE(username);
     VIR_FREE(password);
-    free(hypervVersion);
     hypervFreeObject(priv, (hypervObject *)computerSystem);
 
     return result;

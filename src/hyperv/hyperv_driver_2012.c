@@ -655,3 +655,87 @@ hypervDomainReboot2012(virDomainPtr domain, unsigned int flags)
     return result;
 }
 
+int
+hypervDomainIsActive2012(virDomainPtr domain)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    result = hypervIsMsvmComputerSystemActive2012(computerSystem, NULL) ? 1 : 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+
+    return result;
+}
+
+int
+hypervDomainUndefineFlags2012(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1, nb_params;
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    invokeXmlParam *params = NULL;
+    eprParam eprparam;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+
+    virCheckFlags(0, -1);
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    /* Shutdown the VM if not disabled */
+    if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED) {
+        if (hypervDomainShutdown2012(domain) < 0) {
+            goto cleanup;
+        }
+    }
+
+    /* Deleting the VM */
+
+    /* Prepare EPR param */
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_2012_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+
+    /* Create invokeXmlParam tab */
+    nb_params = 1;
+    if (VIR_ALLOC_N(params, nb_params) < 0)
+        goto cleanup;
+    (*params).name = "AffectedSystem";
+    (*params).type = EPR_PARAM;
+    (*params).param = &eprparam;
+
+    /* Destroy VM */
+    if (hypervInvokeMethod(priv, params, nb_params, "DestroySystem",
+                           MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_2012_RESOURCE_URI, selector) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not delete domain"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    VIR_FREE(params);
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+int
+hypervDomainUndefine2012(virDomainPtr domain)
+{
+    return hypervDomainUndefineFlags2012(domain, 0);
+}
