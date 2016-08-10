@@ -67,4 +67,10 @@ hypervDomainLookupByUUID2012(virConnectPtr conn, const unsigned char *uuid);
 virDomainPtr
 hypervDomainLookupByName2012(virConnectPtr conn, const char *name);
 
+int
+hypervDomainShutdownFlags2012(virDomainPtr domain, unsigned int flags);
+
+int
+hypervDomainShutdown2012(virDomainPtr dom);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */
