@@ -1,5 +1,7 @@
 #include "hyperv_driver_2012.h"
 
+VIR_LOG_INIT("hyperv.hyperv_driver2012");
+
 static int
 hypervMsvmComputerSystemEnabledStateToDomainState2012(
     Msvm_ComputerSystem_2012 *computerSystem)
@@ -1043,4 +1045,109 @@ hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, int 
 
     hypervFreeObject(priv, (hypervObject *)computerSystemList);
     return count;
+}
+
+virDomainPtr
+hypervDomainDefineXML2012(virConnectPtr conn, const char *xml)
+{
+    hypervPrivate *priv = conn->privateData;
+    virDomainDefPtr def = NULL;
+    virDomainPtr domain = NULL;
+    invokeXmlParam *params = NULL;
+    properties_t *tab_props = NULL;
+    embeddedParam embeddedparam;
+    int nb_params;//, i;
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+
+    /* Parse XML domain description */
+    if ((def = virDomainDefParseString(xml, priv->caps, priv->xmlopt,
+                                       1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE)) == NULL) {
+        goto cleanup;
+    }
+
+    /* Create the domain if does not exist */
+    if (def->uuid == NULL || (domain = hypervDomainLookupByUUID2012(conn, def->uuid)) == NULL) {
+        /* Prepare EMBEDDED param */
+        /* Edit only VM name */
+        /* FIXME: cannot edit VM UUID */
+        embeddedparam.nbProps = 1;
+        if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+            goto cleanup;
+        (*tab_props).name = "ElementName";
+        (*tab_props).val = def->name;
+        embeddedparam.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+        embeddedparam.prop_t = tab_props;
+
+        /* Create invokeXmlParam */
+        nb_params = 1;
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+        (*params).name = "SystemSettings";
+        (*params).type = EMBEDDED_PARAM;
+        (*params).param = &embeddedparam;
+
+        /* Create VM */
+        if (hypervInvokeMethod(priv, params, nb_params, "DefineSystem",
+                               MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_2012_RESOURCE_URI, selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not create new domain %s"), def->name);
+            goto cleanup;
+        }
+
+        /* Get domain pointer */
+        domain = hypervDomainLookupByName2012(conn, def->name);
+
+        VIR_DEBUG("Domain created: name=%s, uuid=%s",
+                  domain->name, virUUIDFormat(domain->uuid, uuid_string));
+    }
+
+    /* Set VM maximum memory */
+  /*  if (def->mem.max_memory > 0) {
+        if (hypervDomainSetMaxMemory(domain, def->mem.max_memory) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not set VM maximum memory"));
+        }
+    }*/
+
+    /* Set VM memory */
+/*    if (def->mem.cur_balloon > 0) {
+        if (hypervDomainSetMemory(domain, def->mem.cur_balloon) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not set VM memory"));
+        }
+    }
+*/
+    /* Set VM vcpus */
+    /*
+    if ((int)def->vcpus > 0) {
+        if (hypervDomainSetVcpus(domain, def->vcpus) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not set VM vCPUs"));
+        }
+    }
+    */
+
+    /* Attach networks */
+  /*  for (i = 0; i < def->nnets; i++) {
+        if (hypervDomainAttachNetwork(domain, def->nets[i]) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not attach network"));
+        }
+    }*/
+
+    /* Attach disks */
+/*    for (i = 0; i < def->ndisks; i++) {
+        if (hypervDomainAttachDisk(domain, def->disks[i]) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not attach disk"));
+        }
+    }*/
+
+ cleanup:
+    virDomainDefFree(def);
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+
+    return domain;
 }
