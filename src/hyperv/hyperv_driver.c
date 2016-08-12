@@ -690,7 +690,8 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
     Msvm_MemorySettingData *memorySettingData = NULL;
-    Msvm_VirtualHardDiskSettingData *hardDiskSettingData = NULL;
+    Msvm_ResourceAllocationSettingData *resourceAllocationSettingData = NULL;
+    char **strPtr;
 
     /* Flags checked by virDomainDefFormat */
 
@@ -768,6 +769,73 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
+    /* Get Msvm_ResourceAllocationSettingData (devices of the VM) */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ResourceAllocationSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+    if (hypervGetMsvmResourceAllocationSettingDataList(priv, &query, 
+                                                       &resourceAllocationSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (VIR_ALLOC_N(def->disks, 66) < 0)
+        goto cleanup;
+
+    def->ndisks = 0;
+    
+    while (resourceAllocationSettingData != NULL) {
+        if (resourceAllocationSettingData->data->ResourceType == 
+            MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+
+            if (resourceAllocationSettingData->data->Connection.count > 0) {
+                 strPtr = resourceAllocationSettingData->data->Connection.data;
+                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
+                    
+                                
+                def->disks[def->ndisks] = virDomainDiskDefNew(priv->xmlopt);
+
+                virDomainDiskSetType(def->disks[def->ndisks], VIR_STORAGE_TYPE_FILE);
+
+                if (virDomainDiskSetSource(def->disks[def->ndisks], *strPtr) < 0) {
+                    VIR_FREE(strPtr);
+                    goto cleanup;
+                }
+
+
+//                def->disks[def->ndisks]->device = VIR_DOMAIN_DISK_DEVICE_DISK;
+                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
+                def->disks[def->ndisks]->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
+//                def->disks[def->ndisks]->dst = *strPtr;
+            } else {
+                 VIR_DEBUG("This is a storage extentxxxx");
+            }
+
+            def->ndisks++;
+            
+            break;
+        }
+        
+        VIR_DEBUG("device type %d", resourceAllocationSettingData->data->ResourceType);
+        resourceAllocationSettingData = resourceAllocationSettingData->next;
+    }
+
+    /* 
+associators of {Msvm_ComputerSystem.CreationClassName="Msvm_ComputerSystem",Name="5E855AD2-5FD1-457E-A757-E48D7EC66072"} 
+Where ResultClass=Msvm_VirtualSystemSettingData AssocClass=Msvm_SettingsDefineState
+
+associators of {Msvm_VirtualSystemSettingData.InstanceID="Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072"} 
+where ResultClass=Msvm_ResourceAllocationSettingData AssocClass=Msvm_VirtualSystemSettingDataComponent
+    
+    if (hypervMsvmVirtualHardDiskSettingFromDomain(domain, &hardDiskSettingData) > 0)
+        goto cleanup;
+*/
+
+
     /* Fill struct */
     def->virtType = VIR_DOMAIN_VIRT_HYPERV;
 
@@ -802,10 +870,6 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
 
     def->os.type = VIR_DOMAIN_OSTYPE_HVM;
-
-    /* FIXME: devices section is totally missing */
-    if (hypervMsvmVirtualHardDiskSettingFromDomain(domain, &hardDiskSettingData) > 0)
-        goto cleanup;
 
     xml = virDomainDefFormat(def,
                              virDomainDefFormatConvertXMLFlags(flags));

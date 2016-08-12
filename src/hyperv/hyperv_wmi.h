@@ -199,6 +199,15 @@ int hypervMsvmVirtualHardDiskSettingFromDomain(virDomainPtr domain,
                                         Msvm_VirtualHardDiskSettingData **virtualHardDisk);
 
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_ResourceAllocationSettingData
+ */
+
+/* https://msdn.microsoft.com/en-us/library/cc136877(v=vs.85).aspx */
+enum _Msvm_ResourceAllocationSettingData_ResourceType {
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT = 21,
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK = 22,
+};
 
 # include "hyperv_wmi.generated.h"
 
