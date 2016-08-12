@@ -1775,7 +1775,7 @@ hypervDomainGetAutostart(virDomainPtr domain, int *autostart)
 }
 
 /* Format a number as a string value */
-static char *num2str(unsigned long value)
+char *num2str(unsigned long value)
 {
     int sz;
     char *result;
@@ -1788,8 +1788,6 @@ static char *num2str(unsigned long value)
     sprintf(result, "%lu", value);
     return result;
 }
-
-
 
 static int
 hypervDomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
@@ -1989,8 +1987,6 @@ hypervDomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
 
     return result;
 }
-
-
 
 static int
 hypervDomainSetMemory(virDomainPtr domain, unsigned long memory)
@@ -3285,6 +3281,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName2012;
         hypervHypervisorDriver.domainLookupByUUID = hypervDomainLookupByUUID2012;
         hypervHypervisorDriver.domainReboot = hypervDomainReboot2012;
+        hypervHypervisorDriver.domainSetMemoryFlags = hypervDomainSetMemoryFlags2012;
+        hypervHypervisorDriver.domainSetMemory = hypervDomainSetMemory2012;
         hypervHypervisorDriver.domainShutdownFlags = hypervDomainShutdownFlags2012;
         hypervHypervisorDriver.domainShutdown = hypervDomainShutdown2012;       
         hypervHypervisorDriver.domainUndefineFlags = hypervDomainUndefineFlags2012;
