@@ -1111,13 +1111,13 @@ hypervDomainDefineXML2012(virConnectPtr conn, const char *xml)
     }*/
 
     /* Set VM memory */
-/*    if (def->mem.cur_balloon > 0) {
-        if (hypervDomainSetMemory(domain, def->mem.cur_balloon) < 0) {
+    if (def->mem.cur_balloon > 0) {
+        if (hypervDomainSetMemory2012(domain, def->mem.cur_balloon) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not set VM memory"));
         }
     }
-*/
+
     /* Set VM vcpus */
     /*
     if ((int)def->vcpus > 0) {
@@ -1251,6 +1251,101 @@ hypervDomainGetInfo2012(virDomainPtr domain, virDomainInfoPtr info)
     hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
     hypervFreeObject(priv, (hypervObject *)processorSettingData);
     hypervFreeObject(priv, (hypervObject *)memorySettingData);
+
+    return result;
+}
+
+int
+hypervDomainSetMemory2012(virDomainPtr domain, unsigned long memory)
+{
+    return hypervDomainSetMemoryFlags2012(domain, memory, 0);
+}
+
+int
+hypervDomainSetMemoryFlags2012(virDomainPtr domain, unsigned long memory,
+                               unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1, nb_params;
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    invokeXmlParam *params = NULL;
+    properties_t *tab_props = NULL;
+    embeddedParam embeddedparam;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemSettingData_2012 *virtualSystemSettingData = NULL;
+    Msvm_MemorySettingData_2012 *memorySettingData = NULL;
+    unsigned long memory_mb = memory / 1024;   /* Memory converted in MB */
+    char *memory_str = NULL;
+
+    /* Memory value must be a multiple of 2 MB; round up it accordingly if necessary */
+    if (memory_mb % 2) memory_mb++;
+
+    /* Convert the memory value as a string */
+    memory_str = num2str(memory_mb);
+    if (memory_str == NULL)
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    VIR_DEBUG("memory=%sMb, uuid=%s", memory_str, uuid_string);
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+    if (hypervGetMsvmVirtualSystemSettingData2012List(priv, &query, &virtualSystemSettingData) < 0)
+        goto cleanup;
+
+    /* Get Msvm_MemorySettingData */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_MemorySettingData",
+                      virtualSystemSettingData->data->InstanceID);
+    if (hypervGetMsvmMemorySettingData2012List(priv, &query, &memorySettingData) < 0)
+        goto cleanup;
+
+    /* Prepare EMBEDDED param */
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    (*tab_props).name = "VirtualQuantity";
+    (*tab_props).val = memory_str;
+    (*(tab_props+1)).name = "InstanceID";
+    (*(tab_props+1)).val = memorySettingData->data->InstanceID;
+    embeddedparam.instanceName =  "Msvm_MemorySettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* Create invokeXmlParam */
+    nb_params = 1;
+    if (VIR_ALLOC_N(params, nb_params) < 0)
+        goto cleanup;
+    (*params).name = "ResourceSettings";
+    (*params).type = EMBEDDED_PARAM;
+    (*params).param = &embeddedparam;
+
+    if (hypervInvokeMethod(priv, params, nb_params, "ModifyResourceSettings",
+                           MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_2012_RESOURCE_URI, selector) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not set domain memory"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    VIR_FREE(memory_str);
+    hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
+    hypervFreeObject(priv, (hypervObject *)memorySettingData);
+    virBufferFreeAndReset(&query);
 
     return result;
 }

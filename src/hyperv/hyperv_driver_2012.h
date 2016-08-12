@@ -86,7 +86,8 @@ int
 hypervDomainIsActive2012(virDomainPtr domain);
 
 int
-hypervDomainUndefineFlags2012(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNUSED);
+hypervDomainUndefineFlags2012(virDomainPtr domain, 
+                              unsigned int flags ATTRIBUTE_UNUSED);
 
 int
 hypervDomainUndefine2012(virDomainPtr domain);
@@ -104,12 +105,20 @@ int
 hypervConnectNumOfDefinedDomains2012(virConnectPtr conn);
 
 int
-hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, int maxnames);
+hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, 
+                                    int maxnames);
 
 virDomainPtr
 hypervDomainDefineXML2012(virConnectPtr conn, const char *xml);
 
 int
 hypervDomainGetInfo2012(virDomainPtr domain, virDomainInfoPtr info);
+
+int
+hypervDomainSetMemoryFlags2012(virDomainPtr domain, unsigned long memory,
+                               unsigned int flags ATTRIBUTE_UNUSED);
+
+int
+hypervDomainSetMemory2012(virDomainPtr domain, unsigned long memory);
 
 #endif /* __HYPERV_DRIVER_2012_H__ */
