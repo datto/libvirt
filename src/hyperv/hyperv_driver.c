@@ -3281,6 +3281,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
         hypervHypervisorDriver.domainLookupByName = hypervDomainLookupByName2012;
         hypervHypervisorDriver.domainLookupByUUID = hypervDomainLookupByUUID2012;
         hypervHypervisorDriver.domainReboot = hypervDomainReboot2012;
+        hypervHypervisorDriver.domainSendKey = hypervDomainSendKey2012;
         hypervHypervisorDriver.domainSetMemoryFlags = hypervDomainSetMemoryFlags2012;
         hypervHypervisorDriver.domainSetMemory = hypervDomainSetMemory2012;
         hypervHypervisorDriver.domainShutdownFlags = hypervDomainShutdownFlags2012;

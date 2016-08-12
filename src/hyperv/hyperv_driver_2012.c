@@ -1,4 +1,5 @@
 #include "hyperv_driver_2012.h"
+#include "virkeycode.h"
 
 VIR_LOG_INIT("hyperv.hyperv_driver2012");
 
@@ -1348,5 +1349,140 @@ hypervDomainSetMemoryFlags2012(virDomainPtr domain, unsigned long memory,
     virBufferFreeAndReset(&query);
 
     return result;
+}
+
+int
+hypervDomainSendKey2012(virDomainPtr domain,
+                    unsigned int codeset,
+                    unsigned int holdtime,
+                    unsigned int *keycodes,
+                    int nkeycodes,
+                    unsigned int flags)
+{
+    int result = -1, nb_params, i;
+    char *selector = NULL;    
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    Msvm_Keyboard_2012 *keyboard = NULL;
+    invokeXmlParam *params = NULL;
+    int *translatedKeyCodes = NULL;
+    int keycode;
+    simpleParam simpleparam;
+
+    virCheckFlags(0, -1);
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Get computer system */
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* Get keyboard */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where ResultClass = Msvm_Keyboard",
+                      uuid_string);
+
+    if (hypervGetMsvmKeyboard2012List(priv, &query, &keyboard) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("No keyboard for domain with UUID %s"), uuid_string);
+        goto cleanup;
+    }
+
+    /* Translate keycodes to xt and generate keyup scancodes;
+       this is copied from the vbox driver */
+    translatedKeyCodes = (int *) keycodes;
+
+    for (i = 0; i < nkeycodes; i++) {
+        if (codeset != VIR_KEYCODE_SET_WIN32) {
+            keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_WIN32,
+                                               translatedKeyCodes[i]);
+            if (keycode < 0) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("cannot translate keycode %u of %s codeset to"
+                                 " win32 keycode"),
+                               translatedKeyCodes[i],
+                               virKeycodeSetTypeToString(codeset));
+                goto cleanup;
+            }
+
+            translatedKeyCodes[i] = keycode;
+        }
+    }
+        
+    if (virAsprintf(&selector, 
+                    "CreationClassName=Msvm_Keyboard&DeviceID=%s&"
+                    "SystemCreationClassName=Msvm_ComputerSystem&SystemName=%s",
+                    keyboard->data->DeviceID, uuid_string) < 0)
+        goto cleanup;
+
+    /* Press keys */
+    for (i = 0; i < nkeycodes; i++) {
+        VIR_FREE(params);
+        nb_params = 1;
+
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+
+        char keyCodeStr[sizeof(int)*3+2];
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", translatedKeyCodes[i]);
+
+		simpleparam.value = keyCodeStr;
+
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &simpleparam;
+
+        if (hypervInvokeMethod(priv, params, nb_params, "PressKey",
+                               MSVM_KEYBOARD_2012_RESOURCE_URI, selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not press key with code %d"),
+                           translatedKeyCodes[i]);
+            goto cleanup;
+        }
+    }
+
+    /* Hold keys (copied from vbox driver); since Hyper-V does not support
+	   holdtime, simulate it by sleeping and then sending the release keys */
+    if (holdtime > 0)
+        usleep(holdtime * 1000);
+
+    /* Release keys */
+    for (i = 0; i < nkeycodes; i++) {
+        VIR_FREE(params);
+        nb_params = 1;
+
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+
+        char keyCodeStr[sizeof(int)*3+2];
+        snprintf(keyCodeStr, sizeof keyCodeStr, "%d", translatedKeyCodes[i]);
+
+		simpleparam.value = keyCodeStr;
+
+        (*params).name = "keyCode";
+        (*params).type = SIMPLE_PARAM;
+        (*params).param = &simpleparam;
+
+        if (hypervInvokeMethod(priv, params, nb_params, "ReleaseKey",
+                               MSVM_KEYBOARD_2012_RESOURCE_URI, selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not release key with code %d"),
+                           translatedKeyCodes[i]);
+            goto cleanup;
+        }
+    }
+
+    result = 0;
+
+    cleanup:
+        VIR_FREE(params);
+        hypervFreeObject(priv, (hypervObject *) computerSystem);
+        hypervFreeObject(priv, (hypervObject *) keyboard);
+        virBufferFreeAndReset(&query);
+        return result;
 }
 
