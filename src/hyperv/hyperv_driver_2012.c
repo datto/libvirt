@@ -1151,3 +1151,107 @@ hypervDomainDefineXML2012(virConnectPtr conn, const char *xml)
 
     return domain;
 }
+
+int
+hypervDomainGetInfo2012(virDomainPtr domain, virDomainInfoPtr info)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem_2012 *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData_2012 *virtualSystemSettingData = NULL;
+    Msvm_ProcessorSettingData_2012 *processorSettingData = NULL;
+    Msvm_MemorySettingData_2012 *memorySettingData = NULL;
+
+    memset(info, 0, sizeof(*info));
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Get Msvm_ComputerSystem */
+    if (hypervMsvmComputerSystemFromDomain2012(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                      "Name=\"%s\"} "
+                      "where AssocClass = Msvm_SettingsDefineState "
+                      "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+
+    if (hypervGetMsvmVirtualSystemSettingData2012List(priv, &query,
+                                                  &virtualSystemSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (virtualSystemSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_VirtualSystemSettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_ProcessorSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ProcessorSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    if (hypervGetMsvmProcessorSettingData2012List(priv, &query,
+                                              &processorSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_ProcessorSettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_MemorySettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_MemorySettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    if (hypervGetMsvmMemorySettingData2012List(priv, &query,
+                                           &memorySettingData) < 0) {
+        goto cleanup;
+    }
+
+
+    if (memorySettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for domain %s"),
+                       "Msvm_MemorySettingData",
+                       computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Fill struct */
+    info->state = hypervMsvmComputerSystemEnabledStateToDomainState2012(computerSystem);
+    info->maxMem = memorySettingData->data->Limit * 1024; /* megabyte to kilobyte */
+    info->memory = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
+    info->nrVirtCpu = processorSettingData->data->VirtualQuantity;
+    info->cpuTime = 0;
+
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *)computerSystem);
+    hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
+    hypervFreeObject(priv, (hypervObject *)processorSettingData);
+    hypervFreeObject(priv, (hypervObject *)memorySettingData);
+
+    return result;
+}
+

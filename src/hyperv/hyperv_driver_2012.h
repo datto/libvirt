@@ -109,4 +109,7 @@ hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, int 
 virDomainPtr
 hypervDomainDefineXML2012(virConnectPtr conn, const char *xml);
 
+int
+hypervDomainGetInfo2012(virDomainPtr domain, virDomainInfoPtr info);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */
