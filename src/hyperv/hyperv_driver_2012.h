@@ -94,4 +94,16 @@ hypervDomainUndefine2012(virDomainPtr domain);
 char *
 hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags);
 
+int
+hypervConnectNumOfDomains2012(virConnectPtr conn);
+
+int
+hypervConnectListDomains2012(virConnectPtr conn, int *ids, int maxids);
+
+int
+hypervConnectNumOfDefinedDomains2012(virConnectPtr conn);
+
+int
+hypervConnectListDefinedDomains2012(virConnectPtr conn, char **const names, int maxnames);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */

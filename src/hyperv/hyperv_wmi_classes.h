@@ -45,6 +45,12 @@
 # define MSVM_COMPUTERSYSTEM_WQL_INACTIVE \
     "(EnabledState = 0 or EnabledState = 3 or EnabledState = 32769) "
 
+# define MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL \
+    "Description = \"Microsoft Virtual Machine\" "
+
+# define MSVM_COMPUTERSYSTEM_2012_WQL_PHYSICAL \
+    "Description = \"Microsoft Hosting Computer System\" "
+    
 # define MSVM_COMPUTERSYSTEM_2012_WQL_ACTIVE \
     "(EnabledState != 0 and EnabledState != 3) "
 

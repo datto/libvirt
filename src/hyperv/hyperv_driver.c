@@ -255,7 +255,6 @@ hypervConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem_2012 *computerSystemList2012 = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
 
@@ -268,16 +267,9 @@ hypervConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
 
-    if (strcmp(priv->hypervVersion, HYPERV_VERSION_2008) == 0) {
-        if (hypervGetMsvmComputerSystemList(priv, &query,
-                                            &computerSystemList) < 0) {
-            goto cleanup;
-        }
-    } else if (strcmp(priv->hypervVersion, HYPERV_VERSION_2012) == 0) {
-        if (hypervGetMsvmComputerSystem2012List(priv, &query,
-                                            &computerSystemList2012) < 0) {
-            goto cleanup;
-        }
+    if (hypervGetMsvmComputerSystemList(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
     }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
@@ -292,7 +284,6 @@ hypervConnectListDomains(virConnectPtr conn, int *ids, int maxids)
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystemList);
-    hypervFreeObject(priv, (hypervObject *)computerSystemList2012);
     return success ? count : -1;
 }
 
@@ -829,8 +820,6 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     return xml;
 }
 
-
-
 static int
 hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxnames)
 {
@@ -838,7 +827,6 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem_2012 *computerSystemList2012 = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
     size_t i;
@@ -852,19 +840,10 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
 
-    if (strcmp(priv->hypervVersion, HYPERV_VERSION_2008) == 0) {
-        if (hypervGetMsvmComputerSystemList(priv, &query,
-                                            &computerSystemList) < 0) {
-            goto cleanup;
-        }
-    } else if (strcmp(priv->hypervVersion, HYPERV_VERSION_2012) == 0) {
-        if (hypervGetMsvmComputerSystem2012List(priv, &query,
-                                            &computerSystemList2012) < 0) {
-            goto cleanup;
-        }
+    if (hypervGetMsvmComputerSystemList(priv, &query,
+                                        &computerSystemList) < 0) {
+        goto cleanup;
     }
-
-
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
@@ -888,11 +867,8 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
     }
 
     hypervFreeObject(priv, (hypervObject *)computerSystemList);
-    hypervFreeObject(priv, (hypervObject *)computerSystemList2012);
     return count;
 }
-
-
 
 static int
 hypervConnectNumOfDefinedDomains(virConnectPtr conn)
@@ -3288,6 +3264,12 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth, unsigned int flags
 
     if (computerSystem2012 != NULL) {
         hypervHypervisorDriver.connectListAllDomains = hypervConnectListAllDomains2012;
+        hypervHypervisorDriver.connectListDomains = hypervConnectListDomains2012;
+        hypervHypervisorDriver.connectListDefinedDomains = hypervConnectListDefinedDomains2012;
+        hypervHypervisorDriver.connectNumOfDomains = hypervConnectNumOfDomains2012;
+        hypervHypervisorDriver.connectNumOfDefinedDomains = hypervConnectNumOfDefinedDomains2012;
+        hypervHypervisorDriver.connectIsAlive = hypervConnectIsAlive; /* 2008 & 2012 */
+        hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 2008 & 2012 */        
         hypervHypervisorDriver.domainGetState = hypervDomainGetState2012;
         hypervHypervisorDriver.domainCreate = hypervDomainCreate2012;
         hypervHypervisorDriver.domainCreateWithFlags = hypervDomainCreateWithFlags2012;
