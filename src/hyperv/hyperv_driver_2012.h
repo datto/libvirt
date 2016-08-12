@@ -121,4 +121,12 @@ hypervDomainSetMemoryFlags2012(virDomainPtr domain, unsigned long memory,
 int
 hypervDomainSetMemory2012(virDomainPtr domain, unsigned long memory);
 
+int
+hypervDomainSendKey2012(virDomainPtr domain,
+                    unsigned int codeset,
+                    unsigned int holdtime,
+                    unsigned int *keycodes,
+                    int nkeycodes,
+                    unsigned int flags);
+
 #endif /* __HYPERV_DRIVER_2012_H__ */
