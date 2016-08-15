@@ -269,6 +269,10 @@ typedef char *
                           unsigned int screen,
                           unsigned int flags);
 
+typedef int
+(*virDrvDomainSimpleScreenshot)(virDomainPtr domain /*,
+                                unsigned int flags*/);
+
 typedef char *
 (*virDrvDomainGetXMLDesc)(virDomainPtr dom,
                           unsigned int flags);
@@ -1212,6 +1216,10 @@ typedef int
                                const char *password,
                                unsigned int flags);
 
+typedef int
+(*virDrvDomainSnapshot)(virDomainPtr domain,
+                        unsigned int flags);
+
 typedef struct _virHypervisorDriver virHypervisorDriver;
 typedef virHypervisorDriver *virHypervisorDriverPtr;
 
@@ -1282,6 +1290,7 @@ struct _virHypervisorDriver {
     virDrvDomainCoreDump domainCoreDump;
     virDrvDomainCoreDumpWithFormat domainCoreDumpWithFormat;
     virDrvDomainScreenshot domainScreenshot;
+    virDrvDomainSimpleScreenshot domainSimpleScreenshot;
     virDrvDomainSetVcpus domainSetVcpus;
     virDrvDomainSetVcpusFlags domainSetVcpusFlags;
     virDrvDomainGetVcpusFlags domainGetVcpusFlags;
