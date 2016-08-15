@@ -21,9 +21,11 @@
  */
 
 #include <config.h>
+#include <fcntl.h>
 
 #include "internal.h"
 #include "datatypes.h"
+#include "fdstream.h"
 #include "virdomainobjlist.h"
 #include "virauth.h"
 #include "viralloc.h"
@@ -649,6 +651,94 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     return result;
 }
 
+static char *
+hypervDomainScreenshot(virDomainPtr domain,
+                       virStreamPtr stream,
+                       unsigned int screen,
+                       unsigned int flags)
+{
+    char *result = NULL;
+    const char *xRes = "32";
+    const char *yRes = "32";
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+    thumbnailImage *screenshot;
+    invokeXmlParam *params = NULL;
+    properties_t *tab_props = NULL;
+    eprParam eprparam;
+    simpleParam simpleparam1, simpleparam2;
+    int nb_params;
+    hypervPrivate *priv = domain->conn->privateData;
+    char thumbnailFileName[VIR_UUID_STRING_BUFLEN + HYPERV_SCREENSHOT_FILENAME_LENGTH];
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    UNUSED(screen);
+    UNUSED(flags);
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Prepare EPR param - get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+                      "associators of "
+                              "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+                              "Name=\"%s\"} "
+                              "where AssocClass = Msvm_SettingsDefineState "
+                              "ResultClass = Msvm_VirtualSystemSettingData",
+                      uuid_string);
+
+
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* Create invokeXmlParam tab */
+    nb_params = 3;
+    if (VIR_ALLOC_N(params, nb_params) < 0)
+        goto cleanup;
+
+    simpleparam1.value = strdup(xRes);
+    simpleparam2.value = strdup(yRes);
+
+    (*params).name = "HeightPixels";
+    (*params).type = SIMPLE_PARAM;
+    (*params).param = &simpleparam1;
+    (*(params+1)).name = "WidthPixels";
+    (*(params+1)).type = SIMPLE_PARAM;
+    (*(params+1)).param = &simpleparam2;
+    (*(params+2)).name = "TargetSystem";
+    (*(params+2)).type = EPR_PARAM;
+    (*(params+2)).param = &eprparam;
+
+    screenshot = hypervGetVirtualSystemThumbnailImage(priv, params, nb_params,
+                                                      MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+
+    if (screenshot == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not retrieve thumbnail image"));
+        goto cleanup;
+    }
+
+    /* Save Screenshot */
+    FILE *fd;
+
+    sprintf(thumbnailFileName, "/tmp/thumbnail_%s.rgb565", uuid_string);
+
+    fd = fopen(thumbnailFileName, "w");
+    fwrite(screenshot->data, 1, screenshot->length, fd);
+    fclose(fd);
+
+    if (VIR_STRDUP(result, "image/png") < 0)
+        return NULL;
+
+    if (virFDStreamOpenFile(stream, (const char *)&thumbnailFileName, 0, 0, O_RDONLY) < 0)
+        VIR_FREE(result);
+
+  cleanup:
+    VIR_FREE(screenshot);
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
 
 
 static int
@@ -3376,6 +3466,63 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .name = "Hyper-V",
     .connectOpen = hypervConnectOpen, /* 0.9.5 */
     .connectClose = hypervConnectClose, /* 0.9.5 */
+    .connectGetType = hypervConnectGetType, /* 0.9.5 */
+    .connectGetHostname = hypervConnectGetHostname, /* 0.9.5 */
+    .nodeGetInfo = hypervNodeGetInfo, /* 0.9.5 */
+    .connectListDomains = hypervConnectListDomains, /* 0.9.5 */
+    .connectNumOfDomains = hypervConnectNumOfDomains, /* 0.9.5 */
+    .connectListAllDomains = hypervConnectListAllDomains, /* 0.10.2 */
+    .domainLookupByID = hypervDomainLookupByID, /* 0.9.5 */
+    .domainLookupByUUID = hypervDomainLookupByUUID, /* 0.9.5 */
+    .domainLookupByName = hypervDomainLookupByName, /* 0.9.5 */
+    .domainSuspend = hypervDomainSuspend, /* 0.9.5 */
+    .domainResume = hypervDomainResume, /* 0.9.5 */
+    .domainReboot = hypervDomainReboot, /* 1.3.x */
+    .domainDestroy = hypervDomainDestroy, /* 0.9.5 */
+    .domainDestroyFlags = hypervDomainDestroyFlags, /* 0.9.5 */
+    .domainGetOSType = hypervDomainGetOSType, /* 0.9.5 */
+    .domainGetInfo = hypervDomainGetInfo, /* 0.9.5 */
+    .domainGetState = hypervDomainGetState, /* 0.9.5 */
+    .domainScreenshot = hypervDomainScreenshot, /* pjr - 08/08/16 */
+    .domainGetXMLDesc = hypervDomainGetXMLDesc, /* 0.9.5 */
+    .connectListDefinedDomains = hypervConnectListDefinedDomains, /* 0.9.5 */
+    .connectNumOfDefinedDomains = hypervConnectNumOfDefinedDomains, /* 0.9.5 */
+    .domainCreate = hypervDomainCreate, /* 0.9.5 */
+    .domainCreateWithFlags = hypervDomainCreateWithFlags, /* 0.9.5 */
+    .connectIsEncrypted = hypervConnectIsEncrypted, /* 0.9.5 */
+    .connectIsSecure = hypervConnectIsSecure, /* 0.9.5 */
+    .domainIsActive = hypervDomainIsActive, /* 0.9.5 */
+    .domainIsPersistent = hypervDomainIsPersistent, /* 0.9.5 */
+    .domainIsUpdated = hypervDomainIsUpdated, /* 0.9.5 */
+    .domainManagedSave = hypervDomainManagedSave, /* 0.9.5 */
+    .domainHasManagedSaveImage = hypervDomainHasManagedSaveImage, /* 0.9.5 */
+    .domainManagedSaveRemove = hypervDomainManagedSaveRemove, /* 0.9.5 */
+    .connectIsAlive = hypervConnectIsAlive, /* 0.9.8 */
+    .connectGetVersion = hypervConnectGetVersion, /* 1.2.10 */
+    .connectGetCapabilities = hypervConnectGetCapabilities, /* 1.2.10 */
+    .connectGetMaxVcpus = hypervConnectGetMaxVcpus, /* 1.2.10 */
+    .domainGetMaxVcpus = hypervDomainGetMaxVcpus, /* 1.2.10 */
+    .domainGetVcpusFlags = hypervDomainGetVcpusFlags, /* 1.2.10 */
+    .domainGetVcpus = hypervDomainGetVcpus, /* 1.2.10 */
+    .nodeGetFreeMemory = hypervNodeGetFreeMemory, /* 1.2.10 */
+    .domainShutdownFlags = hypervDomainShutdownFlags, /* 1.2.10 */
+    .domainShutdown = hypervDomainShutdown, /* 1.2.10 */
+    .domainGetSchedulerParametersFlags = hypervDomainGetSchedulerParametersFlags, /* 1.2.10 */
+    .domainGetSchedulerParameters = hypervDomainGetSchedulerParameters, /* 1.2.10 */
+    .domainGetSchedulerType = hypervDomainGetSchedulerType, /* 1.2.10 */
+    .domainSetAutostart = hypervDomainSetAutostart, /* 1.2.10 */
+    .domainGetAutostart = hypervDomainGetAutostart, /* 1.2.10 */
+    .domainSetMaxMemory = hypervDomainSetMaxMemory, /* 1.2.10 */
+    .domainSetMemory = hypervDomainSetMemory, /* 1.2.10 */
+    .domainSetMemoryFlags = hypervDomainSetMemoryFlags, /* 1.2.10 */
+    .domainSetVcpus = hypervDomainSetVcpus, /* 1.2.10 */
+    .domainSetVcpusFlags = hypervDomainSetVcpusFlags, /* 1.2.10 */
+    .domainUndefine = hypervDomainUndefine, /* 1.2.10 */
+    .domainUndefineFlags = hypervDomainUndefineFlags, /* 1.2.10 */
+    .domainAttachDevice = hypervDomainAttachDevice, /* 1.2.10 */
+    .domainAttachDeviceFlags = hypervDomainAttachDeviceFlags, /* 1.2.10 */
+    .domainDefineXML = hypervDomainDefineXML, /* 1.2.10 */
+    .domainCreateXML = hypervDomainCreateXML, /* 1.2.10 */
 };
 
 /* Retrieves host system UUID  */
@@ -3495,3 +3642,4 @@ hypervRegister(void)
     return virRegisterConnectDriver(&hypervConnectDriver,
                                     false);
 }
+

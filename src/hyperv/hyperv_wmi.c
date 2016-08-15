@@ -875,7 +875,6 @@ hypervAddEmbeddedParam(properties_t *prop_t, int nbProps, const char *paramName,
     return result;
 }
 
-
 /* Call wsmc_action_invoke() function of OpenWsman API with XML tree given in parameters*/
 static int
 hypervInvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
@@ -1108,6 +1107,190 @@ hypervInvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParameter
     result = 0;
 
  cleanup:
+    if (doc != NULL)
+        ws_xml_destroy_doc(doc);
+
+    return result;
+}
+
+/* Call wsmc_action_invoke() function of OpenWsman API with XML tree given in parameters*/
+static thumbnailImage *
+hypervGetVirtualSystemThumbnailImageXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
+                      const char *methodName, const char *ressourceURI, const char *selector)
+{
+    int returnCode;
+    int childCount;
+    int i;
+    char *instanceID = NULL;
+    char *xpath_expr_string = NULL;
+    char *returnValue = NULL;
+    char *nameSpace = NULL;
+    char *imageDataText = NULL;
+    char *imageDataBuffer = NULL;
+    thumbnailImage *result = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    virBuffer xpath_expr_buff = VIR_BUFFER_INITIALIZER;
+    client_opt_t *options = NULL;
+    WsXmlNodeH envelope = NULL;
+    WsXmlNodeH body = NULL;
+    WsXmlNodeH thumbnail = NULL;
+    WsXmlNodeH imageData = NULL;
+    WsXmlDocH response = NULL;
+
+    options = wsmc_options_init();
+
+    if (options == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not initialize options"));
+        goto cleanup;
+    }
+
+    wsmc_add_selectors_from_str(options, selector);
+
+    /* Invoke action */
+    response = wsmc_action_invoke(priv->client, ressourceURI, options, methodName, xmlDocRoot);
+
+    virBufferAsprintf(&xpath_expr_buff, "/s:Envelope/s:Body/p:%s_OUTPUT/p:ReturnValue", methodName);
+    xpath_expr_string = virBufferContentAndReset(&xpath_expr_buff);
+
+    if (xpath_expr_string == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for %s invocation"),
+                       "ReturnValue", "RequestStateChange");
+        goto cleanup;
+    }
+
+    /* Check return value */
+    returnValue = ws_xml_get_xpath_value(response, xpath_expr_string);
+
+    VIR_FREE(xpath_expr_string);
+    xpath_expr_string = NULL;
+
+    if (returnValue == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for %s invocation"),
+                       "ReturnValue", "RequestStateChange");
+        goto cleanup;
+    }
+
+    if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse return code from '%s'"), returnValue);
+        goto cleanup;
+    }
+
+    // @todo check returnValue and act appropriately
+
+    // go to the node that has the data
+    envelope = ws_xml_get_soap_envelope(response);
+    body = ws_xml_get_child(envelope, 1, NULL, NULL);
+    thumbnail = ws_xml_get_child(body, 0, NULL, NULL);
+
+    if (envelope == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Blah!"));
+        goto cleanup;
+    } else {
+        childCount = ws_xml_get_child_count(thumbnail);
+        nameSpace = ws_xml_get_node_name_ns(thumbnail);
+
+        // pjr - this is debug - remove!!
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Child count: %d, namespace: %s"), childCount, nameSpace);
+    }
+
+    // iterate over the data and collect it together
+    imageDataBuffer = (char *)calloc(childCount+1, sizeof(char));
+
+    for (i=0; i < childCount; i++) {
+        imageData = ws_xml_get_child(thumbnail, i, NULL, NULL);
+        imageDataText = ws_xml_get_node_text(imageData);
+        imageDataBuffer[i] = (char)atoi(imageDataText);
+    }
+
+    // return the data
+    if (VIR_ALLOC(result) < 0)
+        goto cleanup;
+
+    result->data = imageDataBuffer;
+    result->length = childCount;
+
+    cleanup:
+    if (options != NULL)
+        wsmc_options_destroy(options);
+    if (response != NULL)
+        ws_xml_destroy_doc(response);
+    VIR_FREE(returnValue);
+    VIR_FREE(instanceID);
+    VIR_FREE(xpath_expr_string);
+    virBufferFreeAndReset(&query);
+    virBufferFreeAndReset(&xpath_expr_buff);
+
+    return result;
+}
+
+/* Calls the get thumbnails method by passing provided parameters as an XML tree */
+thumbnailImage *
+hypervGetVirtualSystemThumbnailImage(hypervPrivate *priv, invokeXmlParam *param_t, int nbParameters,
+                                     const char* providerURI, const char *selector) {
+    const char* methodName = "GetVirtualSystemThumbnailImage";
+    thumbnailImage *result = NULL;
+    WsXmlDocH doc = NULL;
+    WsXmlNodeH methodNode = NULL;
+    simpleParam *simple;
+    eprParam *epr;
+    embeddedParam *embedded;
+    int i =0;
+
+    if (hypervCreateXmlStruct(methodName,providerURI,&doc,&methodNode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s",
+                       _("Could not create xml base structure"));
+        goto cleanup;
+    }
+
+    /* Process parameters among the three allowed types */
+    while ( i < nbParameters) {
+        switch (param_t[i].type) {
+            case SIMPLE_PARAM:
+                simple = (simpleParam *) param_t[i].param;
+                if (hypervAddSimpleParam(param_t[i].name,simple->value, providerURI, &methodNode) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                                   "%s",
+                                   _("Could not add embedded instance param to xml base structure"));
+                    goto cleanup;
+                }
+                break;
+            case EPR_PARAM:
+                epr = (eprParam *) param_t[i].param;
+                if (hypervAddEprParam(param_t[i].name, epr->query, epr->wmiProviderURI, providerURI, &methodNode, doc, priv) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                                   "%s",
+                                   _("Could not add EPR param to xml base structure"));
+                    goto cleanup;
+                }
+                break;
+            case EMBEDDED_PARAM:
+                embedded = (embeddedParam *) param_t[i].param;
+                if (hypervAddEmbeddedParam(embedded->prop_t, embedded->nbProps, param_t[i].name, embedded->instanceName, providerURI, &methodNode) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                                   "%s",
+                                   _("Could not add embedded instance param to xml base structure"));
+                    goto cleanup;
+                }
+                break;
+        }
+        i++;
+    }
+
+    /* Call the invoke method */
+    result = hypervGetVirtualSystemThumbnailImageXml(priv, doc, methodName, providerURI, selector);
+
+    if (result == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s",
+                       _("Error during invocation action"));
+    }
+
+    cleanup:
     if (doc != NULL)
         ws_xml_destroy_doc(doc);
 
