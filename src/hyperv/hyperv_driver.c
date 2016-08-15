@@ -21,9 +21,11 @@
  */
 
 #include <config.h>
+#include <fcntl.h>
 
 #include "internal.h"
 #include "datatypes.h"
+#include "fdstream.h"
 #include "virdomainobjlist.h"
 #include "virauth.h"
 #include "viralloc.h"
@@ -649,9 +651,6 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     return result;
 }
 
-
-#define UNUSED(x) (void)(x)
-
 static char *
 hypervDomainScreenshot(virDomainPtr domain,
                        virStreamPtr stream,
@@ -668,14 +667,13 @@ hypervDomainScreenshot(virDomainPtr domain,
     eprParam eprparam;
     simpleParam simpleparam1, simpleparam2;
     int nb_params;
-
-    UNUSED(stream);
-    UNUSED(screen);
-    UNUSED(flags);
-
     hypervPrivate *priv = domain->conn->privateData;
+    char thumbnailFileName[VIR_UUID_STRING_BUFLEN + HYPERV_SCREENSHOT_FILENAME_LENGTH];
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    UNUSED(screen);
+    UNUSED(flags);
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -687,6 +685,7 @@ hypervDomainScreenshot(virDomainPtr domain,
                               "where AssocClass = Msvm_SettingsDefineState "
                               "ResultClass = Msvm_VirtualSystemSettingData",
                       uuid_string);
+
 
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -720,9 +719,17 @@ hypervDomainScreenshot(virDomainPtr domain,
     /* Save Screenshot */
     FILE *fd;
 
-    fd = fopen("/tmp/virThumbnail", "w");
+    sprintf(thumbnailFileName, "/tmp/thumbnail_%s.rgb565", uuid_string);
+
+    fd = fopen(thumbnailFileName, "w");
     fwrite(screenshot->data, 1, screenshot->length, fd);
     fclose(fd);
+
+    if (VIR_STRDUP(result, "image/png") < 0)
+        return NULL;
+
+    if (virFDStreamOpenFile(stream, (const char *)&thumbnailFileName, 0, 0, O_RDONLY) < 0)
+        VIR_FREE(result);
 
   cleanup:
     VIR_FREE(screenshot);
@@ -3635,3 +3642,4 @@ hypervRegister(void)
     return virRegisterConnectDriver(&hypervConnectDriver,
                                     false);
 }
+
