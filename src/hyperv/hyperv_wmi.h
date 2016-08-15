@@ -155,6 +155,18 @@ hypervInvokeMethod(hypervPrivate *priv,
                    const char* providerURI,
                    const char *selector);
 
+typedef struct _thumbnailImage thumbnailImage;
+struct _thumbnailImage{
+	const char *data;
+	int length;
+};
+
+thumbnailImage *
+hypervGetVirtualSystemThumbnailImage(hypervPrivate *priv,
+									 invokeXmlParam *param_t,
+									 int nbParameters,
+                                     const char* providerURI,
+									 const char *selector);
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
