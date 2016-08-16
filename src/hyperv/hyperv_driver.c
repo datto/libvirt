@@ -767,6 +767,89 @@ hypervDomainGetState(virDomainPtr domain, int *state, int *reason,
     return result;
 }
 
+static int
+hypervParseDomainDefStorageExtent(
+            virDomainPtr domain, virDomainDefPtr def,
+            Msvm_ResourceAllocationSettingData *rasdEntry)
+{
+    int result = -1;
+    char **connData;    
+    hypervPrivate *priv = domain->conn->privateData;
+    virDomainDiskDefPtr disk;
+    
+    if (rasdEntry->data->Connection.count > 0) {
+        disk = virDomainDiskDefNew(priv->xmlopt);
+        
+        /* Type */
+        virDomainDiskSetType(disk, VIR_STORAGE_TYPE_FILE);
+
+        /* Source */
+        connData = rasdEntry->data->Connection.data;
+
+        if (virDomainDiskSetSource(disk, *connData) < 0) {
+            VIR_FREE(connData);
+            goto cleanup;
+        }
+
+        /* Bus */
+        disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+
+        def->disks[def->ndisks] = disk;
+        def->ndisks++;
+    }
+
+    result = 0;
+    
+    cleanup:    
+        return result;       
+}
+
+static int
+hypervParseDomainDefScsiController(
+            virDomainDefPtr def,
+            Msvm_ResourceAllocationSettingData *rasdEntry ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    virDomainControllerDefPtr controller;
+    
+    if (VIR_ALLOC(controller) < 0) {
+        goto cleanup;
+    }
+
+    controller->type = VIR_DOMAIN_CONTROLLER_TYPE_SCSI;
+            
+    def->controllers[def->ncontrollers] = controller;
+    def->ncontrollers++;
+
+    result = 0;
+    
+    cleanup:    
+        return result;       
+}
+
+static int
+hypervParseDomainDefIdeController(
+            virDomainDefPtr def,
+            Msvm_ResourceAllocationSettingData *rasdEntry ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    virDomainControllerDefPtr controller;
+    
+    if (VIR_ALLOC(controller) < 0) {
+        goto cleanup;
+    }
+
+    controller->type = VIR_DOMAIN_CONTROLLER_TYPE_IDE;
+    controller->idx = atoi(rasdEntry->data->Address);
+            
+    def->controllers[def->ncontrollers] = controller;
+    def->ncontrollers++;
+
+    result = 0;
+    
+    cleanup:    
+        return result;       
+}
 
 static char *
 hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
@@ -775,13 +858,13 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDefPtr def = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
+    int resourceType = -1;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
     Msvm_MemorySettingData *memorySettingData = NULL;
     Msvm_ResourceAllocationSettingData *resourceAllocationSettingData = NULL;
-    char **strPtr;
 
     /* Flags checked by virDomainDefFormat */
 
@@ -874,40 +957,31 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 
     if (VIR_ALLOC_N(def->disks, 66) < 0)
         goto cleanup;
+        
+    if (VIR_ALLOC_N(def->controllers, 66) < 0)
+        goto cleanup;        
 
     def->ndisks = 0;
+    def->ncontrollers = 0;
     
     while (resourceAllocationSettingData != NULL) {
-        if (resourceAllocationSettingData->data->ResourceType == 
-            MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
-
-            if (resourceAllocationSettingData->data->Connection.count > 0) {
-                 strPtr = resourceAllocationSettingData->data->Connection.data;
-                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
-                    
-                                
-                def->disks[def->ndisks] = virDomainDiskDefNew(priv->xmlopt);
-
-                virDomainDiskSetType(def->disks[def->ndisks], VIR_STORAGE_TYPE_FILE);
-
-                if (virDomainDiskSetSource(def->disks[def->ndisks], *strPtr) < 0) {
-                    VIR_FREE(strPtr);
-                    goto cleanup;
-                }
-
-
-//                def->disks[def->ndisks]->device = VIR_DOMAIN_DISK_DEVICE_DISK;
-                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
-                def->disks[def->ndisks]->bus = VIR_DOMAIN_DISK_BUS_SCSI;
-                 VIR_DEBUG("This is a storage extent ! =%s", *strPtr);
-//                def->disks[def->ndisks]->dst = *strPtr;
-            } else {
-                 VIR_DEBUG("This is a storage extentxxxx");
+        resourceType = resourceAllocationSettingData->data->ResourceType;
+        
+        if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+            if (hypervParseDomainDefStorageExtent(domain, def, 
+                                                  resourceAllocationSettingData) < 0) {
+                goto cleanup;
             }
-
-            def->ndisks++;
-            
-            break;
+        } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+            if (hypervParseDomainDefScsiController(def, 
+                                                  resourceAllocationSettingData) < 0) {
+                goto cleanup;
+            }
+        } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {
+            if (hypervParseDomainDefIdeController(def, 
+                                                  resourceAllocationSettingData) < 0) {
+                goto cleanup;
+            }
         }
         
         VIR_DEBUG("device type %d", resourceAllocationSettingData->data->ResourceType);
