@@ -53,7 +53,6 @@
 #include "network_conf.h"
 #include "virtpm.h"
 #include "virstring.h"
-#include "domain_conf.h"
 
 #define VIR_FROM_THIS VIR_FROM_DOMAIN
 
