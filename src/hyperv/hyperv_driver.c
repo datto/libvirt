@@ -793,7 +793,7 @@ hypervParseDomainDefStorageExtent(
 
         /* Bus */
         disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
-
+        //disk->dst =
         def->disks[def->ndisks] = disk;
         def->ndisks++;
     }
@@ -802,6 +802,65 @@ hypervParseDomainDefStorageExtent(
     
     cleanup:    
         return result;       
+}
+
+static int
+hypervParseDomainDefDisk(
+        virDomainPtr domain, virDomainDefPtr def,
+        Msvm_ResourceAllocationSettingData *rasdEntry)
+{
+    int result = -1;
+    char **hostResourceDataPath;
+    char *hostResourceDataPathEscaped;    
+    char driveNumberStr[11];    
+    hypervPrivate *priv = domain->conn->privateData;
+    virDomainDiskDefPtr disk;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_DiskDrive *diskDrive = NULL;
+
+    if (rasdEntry->data->HostResource.count > 0) {
+        /* Escape HostResource path */        
+        hostResourceDataPath = rasdEntry->data->HostResource.data;        
+        hostResourceDataPathEscaped = virStringReplace(*hostResourceDataPath, "\\", "\\\\");
+        hostResourceDataPathEscaped = virStringReplace(hostResourceDataPathEscaped, "\"", "\\\"");
+
+        /* Get Msvm_DiskDrive (to get DriveNumber) */
+        virBufferAsprintf(&query,
+                          "select * from Msvm_DiskDrive where __PATH=\"%s\"",
+                          hostResourceDataPathEscaped);
+
+        if (hypervGetMsvmDiskDriveList(priv, &query, &diskDrive) < 0) {
+            goto cleanup;
+        }    
+
+        /* Define new disk */
+        disk = virDomainDiskDefNew(priv->xmlopt);
+
+        /* Type */
+        virDomainDiskSetType(disk, VIR_STORAGE_TYPE_BLOCK);
+    
+        /* Source (Drive Number) */        
+        if (sprintf(driveNumberStr, "%d", diskDrive->data->DriveNumber) < 0) {
+            goto cleanup;
+        }
+        
+        if (virDomainDiskSetSource(disk, driveNumberStr) < 0) {
+            VIR_FREE(driveNumberStr);
+            goto cleanup;
+        }
+
+
+        /* Bus */
+        // disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+        //disk->dst =
+        def->disks[def->ndisks] = disk;
+        def->ndisks++;
+    }
+
+    result = 0;
+
+    cleanup:
+        return result;
 }
 
 static int
@@ -955,21 +1014,28 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(def->disks, 66) < 0)
+    if (VIR_ALLOC_N(def->disks, 66) < 0) {
         goto cleanup;
+    }
         
-    if (VIR_ALLOC_N(def->controllers, 66) < 0)
-        goto cleanup;        
+    if (VIR_ALLOC_N(def->controllers, 66) < 0) {
+        goto cleanup;
+    }
 
     def->ndisks = 0;
     def->ncontrollers = 0;
     
     while (resourceAllocationSettingData != NULL) {
         resourceType = resourceAllocationSettingData->data->ResourceType;
+        VIR_DEBUG("device type %d", resourceAllocationSettingData->data->ResourceType);
         
         if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
             if (hypervParseDomainDefStorageExtent(domain, def, 
                                                   resourceAllocationSettingData) < 0) {
+                goto cleanup;
+            }
+        } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK) {
+            if (hypervParseDomainDefDisk(domain, def, resourceAllocationSettingData) < 0) {
                 goto cleanup;
             }
         } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
@@ -984,7 +1050,6 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
             }
         }
         
-        VIR_DEBUG("device type %d", resourceAllocationSettingData->data->ResourceType);
         resourceAllocationSettingData = resourceAllocationSettingData->next;
     }
 
@@ -2496,7 +2561,7 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     char *ideRasdPath = NULL, *newDiskDrivePath = NULL;
-    char ideControler[2], ideControlerAddr[2];
+    char ideController[2], ideControllerAddr[2];
     hypervPrivate *priv = domain->conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
@@ -2519,25 +2584,25 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
 
     /* Set IDE Controler 0 or 1 and address 0 or 1 */
     if (STREQ(disk->dst, "hda")) {
-        sprintf(ideControler, "%d", 0);
-        sprintf(ideControlerAddr, "%d", 0);
+        sprintf(ideController, "%d", 0);
+        sprintf(ideControllerAddr, "%d", 0);
     } else if (STREQ(disk->dst, "hdb")) {
-        sprintf(ideControler, "%d", 0);
-        sprintf(ideControlerAddr, "%d", 1);
+        sprintf(ideController, "%d", 0);
+        sprintf(ideControllerAddr, "%d", 1);
     } else if (STREQ(disk->dst, "hdc")) {
-        sprintf(ideControler, "%d", 1);
-        sprintf(ideControlerAddr, "%d", 0);
+        sprintf(ideController, "%d", 1);
+        sprintf(ideControllerAddr, "%d", 0);
     } else if (STREQ(disk->dst, "hdd")) {
-        sprintf(ideControler, "%d", 1);
-        sprintf(ideControlerAddr, "%d", 1);
+        sprintf(ideController, "%d", 1);
+        sprintf(ideControllerAddr, "%d", 1);
     } else {
         /* IDE Controler 0 and address 0 choosen by default */
-        sprintf(ideControler, "%d", 0);
-        sprintf(ideControlerAddr, "%d", 0);
+        sprintf(ideController, "%d", 0);
+        sprintf(ideControllerAddr, "%d", 0);
     }
 
     VIR_DEBUG("src=%s, dst=IDE Controller %s:%s, uuid=%s",
-              disk->src->path, ideControler, ideControlerAddr, uuid_string);
+              disk->src->path, ideController, ideControllerAddr, uuid_string);
 
     /* Get the current VM settings object */
     virBufferAsprintf(&query,
@@ -2564,7 +2629,7 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     }
     ideRasd = resourceAllocationSettingData;
     while (ideRasd != NULL) {
-        if (ideRasd->data->ResourceType == 5 && STREQ(ideRasd->data->Address, ideControler)) {
+        if (ideRasd->data->ResourceType == 5 && STREQ(ideRasd->data->Address, ideController)) {
             /* IDE Controller 0 or 1 */
             break;
         }
@@ -2572,7 +2637,7 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     }
     if (ideRasd == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not find IDE Controller %s"), ideControler);
+                       _("Could not find IDE Controller %s"), ideController);
         goto cleanup;
     }
 
@@ -2629,7 +2694,7 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     (*tab_props).name = "Parent";
     (*tab_props).val = ideRasdPath;
     (*(tab_props+1)).name = "Address";
-    (*(tab_props+1)).val = ideControlerAddr;
+    (*(tab_props+1)).val = ideControllerAddr;
     (*(tab_props+2)).name = "ResourceType";
     (*(tab_props+2)).val = "22";
     (*(tab_props+3)).name = "ResourceSubType";
@@ -2670,7 +2735,7 @@ hypervDomainAttachDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
         if (newDiskDrive->data->ResourceType == 22 &&
             STREQ(newDiskDrive->data->ResourceSubType, "Microsoft Synthetic Disk Drive") &&
             STREQ(newDiskDrive->data->Parent, ideRasdPath) &&
-            STREQ(newDiskDrive->data->Address, ideControlerAddr)) {
+            STREQ(newDiskDrive->data->Address, ideControllerAddr)) {
             break;
         }
         newDiskDrive = newDiskDrive->next;
