@@ -801,87 +801,98 @@ hypervParseDomainDefFindParentRasd(
     return result; 
 }
 
+
+static int
+hypervParseDomainDefSetDiskTarget(
+            virDomainDiskDefPtr disk,
+            Msvm_ResourceAllocationSettingData *rasdEntry,
+            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+            int *scsiDriveIndex)
+{
+    int result = -1;
+    char *expectedInstanceIdEndsWithStr;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int ideControllerIndex = 0;
+    int scsiControllerIndex = 0;    
+    int driveIndex = 0;
+    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
+
+    /* Index of drive relative to controller. */
+    if (rasdEntry->data->Address == NULL) {
+        VIR_DEBUG("Drive does not have an address. Skipping.");
+        goto cleanup;
+    }
+
+    driveIndex = atoi(rasdEntry->data->Address);
+
+    /* Find parent controller (ISCSI or IDE), and set 'dst' and 'bus' */
+    while (rasdEntryArr != NULL) {
+        virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
+        expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
+        expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
+    
+        if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+            if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {                             
+                ideControllerIndex = atoi(rasdEntryArr->data->Address);
+                
+                disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
+                disk->dst = virIndexToDiskName(ideControllerIndex * 2 + driveIndex, "hd"); // max. 2 drives per IDE bus
+                break;
+            } else if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+                disk->dst = virIndexToDiskName(scsiControllerIndex * 15 + *scsiDriveIndex, "sd");
+                
+                (*scsiDriveIndex)++;
+                break;
+            }
+        }            
+
+        // Count SCSI controllers (IDE bus has 'Address' field)
+        if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+            scsiControllerIndex++;
+        }
+
+        // Move to next item in linked list            
+        rasdEntryArr = rasdEntryArr->next;
+    }
+    
+    result = 0;
+    
+  cleanup:    
+    return result;    
+}
+
 static int
 hypervParseDomainDefStorageExtent(
             virDomainPtr domain, virDomainDefPtr def,
             Msvm_ResourceAllocationSettingData *rasdEntry,
             Msvm_ResourceAllocationSettingData *rasdEntryArrStart,            
-            int *scsiDriveIndex ATTRIBUTE_UNUSED)
+            int *scsiDriveIndex)
 {
     int result = -1;
     char **connData;    
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDiskDefPtr disk;
-    char *expectedInstanceIdEndsWithStr;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ResourceAllocationSettingData *rasdEntryArr;
     Msvm_ResourceAllocationSettingData *hddOrDvdParentRasdEntry = NULL;    
-    int ideControllerIndex = 0;
-    int scsiControllerIndex = 0;    
-    int driveIndex = 0;
 
     if (rasdEntry->data->Connection.count > 0) {
-        if (hypervParseDomainDefFindParentRasd(rasdEntry, rasdEntryArrStart,
-                                               &hddOrDvdParentRasdEntry) < 0) {
-            VIR_DEBUG("Cannot find CD/DVD or HDD for storage extent entry. Skipping.");
-            goto cleanup;
-        }
-    
-    
+        /* Define new disk */
         disk = virDomainDiskDefNew(priv->xmlopt);
 
-    
-        /**
-         * Index of drive relative to controller.
-         */
-        if (hddOrDvdParentRasdEntry->data->Address == NULL) {
+        /* Find CD/DVD or HDD drive this entry is associated to */
+        if (hypervParseDomainDefFindParentRasd(rasdEntry, rasdEntryArrStart,
+                                               &hddOrDvdParentRasdEntry) < 0) {
+            VIR_DEBUG("Cannot find parent CD/DVD/HDD drive. Skipping.");
+            goto cleanup;
+        }    
+
+        /* Target (dst and bus) */
+        if (hypervParseDomainDefSetDiskTarget(disk, hddOrDvdParentRasdEntry,
+            rasdEntryArrStart, scsiDriveIndex) < 0) {
+            VIR_DEBUG("Cannot set target. Skipping.");
             goto cleanup;
         }
 
-        driveIndex = atoi(hddOrDvdParentRasdEntry->data->Address);    
-    
-    
-            VIR_DEBUG("drive index %d", driveIndex);
-
-    
-        rasdEntryArr = rasdEntryArrStart;
-
-        while (rasdEntryArr != NULL) {
-            virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
-            expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
-            expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
-        
-            if (virStringEndsWith(hddOrDvdParentRasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
-                if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {                             
-                    ideControllerIndex = atoi(rasdEntryArr->data->Address);
-                    
-                    disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
-                    disk->dst = virIndexToDiskName(ideControllerIndex * 2 + driveIndex, "hd"); // max. 2 drives per IDE bus
-                    break;
-                } else if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
-                    disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
-                    disk->dst = virIndexToDiskName(scsiControllerIndex * 15 + *scsiDriveIndex, "sd");
-                    
-                    (*scsiDriveIndex)++;
-                    break;
-                }
-            }            
-
-            // Count SCSI controllers (IDE bus has 'Address' field)
-            if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
-                scsiControllerIndex++;
-            }
-
-            // Move to next item in linked list            
-            rasdEntryArr = rasdEntryArr->next;
-        }    
-    
-    
-    
-    
-    
-    
-        
         /* Type */
         virDomainDiskSetType(disk, VIR_STORAGE_TYPE_FILE);
 
@@ -959,9 +970,7 @@ hypervParseDomainDefDisk(
             goto cleanup;
         }        
         
-        /**
-         * Index of drive relative to controller.
-         */
+        /* Index of drive relative to controller. */
         if (rasdEntry->data->Address == NULL) {
             goto cleanup;
         }
