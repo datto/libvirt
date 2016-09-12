@@ -821,12 +821,12 @@ hypervParseDomainDefDisk(
     Msvm_DiskDrive *diskDrive = NULL;
     Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
 
-    if (rasdEntry->data->HostResource.count > 0) {
+    if (rasdEntry->data->HostResource.count > 0) {           
         /* Define new disk */
-        disk = virDomainDiskDefNew(priv->xmlopt);
-    
+        disk = virDomainDiskDefNew(priv->xmlopt);        
+
         /* Escape HostResource path */        
-        hostResourceDataPath = rasdEntry->data->HostResource.data;        
+        hostResourceDataPath = rasdEntry->data->HostResource.data;      
         hostResourceDataPathEscaped = virStringReplace(*hostResourceDataPath, "\\", "\\\\");
         hostResourceDataPathEscaped = virStringReplace(hostResourceDataPathEscaped, "\"", "\\\"");
 
@@ -836,10 +836,14 @@ hypervParseDomainDefDisk(
                           "select * from Msvm_DiskDrive where __PATH=\"%s\"",
                           hostResourceDataPathEscaped);
 
+        /* Please note:
+         *     diskDrive could still be NULL, if no drive is attached,
+         *     i.e. if "No disk selected" appears in the Hyper-V UI.
+         */
         if (hypervGetMsvmDiskDriveList(priv, &query, &diskDrive) < 0) {
             goto cleanup;
-        }    
-
+        }        
+        
         /* Find IDE/SCSI controller in RASD list. This is done by walking 
          * through the entire device list and comparing the 'Parent' entry
          * of the disk RASD entry with the potential parent's 'InstanceID'.
@@ -871,17 +875,22 @@ hypervParseDomainDefDisk(
 
         /* Type */
         virDomainDiskSetType(disk, VIR_STORAGE_TYPE_BLOCK);
-    
-        /* Source (Drive Number) */        
-        if (sprintf(driveNumberStr, "%d", diskDrive->data->DriveNumber) < 0) {
-            goto cleanup;
-        }
-        
-        if (virDomainDiskSetSource(disk, driveNumberStr) < 0) {
-            VIR_FREE(driveNumberStr);
-            goto cleanup;
-        }
 
+        /* Source (Drive Number) */
+        if (diskDrive != NULL && diskDrive->data != NULL) {            
+            if (sprintf(driveNumberStr, "%d", diskDrive->data->DriveNumber) < 0) {
+                goto cleanup;
+            }
+            
+            if (virDomainDiskSetSource(disk, driveNumberStr) < 0) {
+                VIR_FREE(driveNumberStr);
+                goto cleanup;
+            }
+        } else {
+            if (virDomainDiskSetSource(disk, "-1") < 0) { // No disk selected
+                goto cleanup; 
+            }
+        }
 
         /* Add disk */
         def->disks[def->ndisks] = disk;
