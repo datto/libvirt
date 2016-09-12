@@ -770,7 +770,8 @@ hypervDomainGetState(virDomainPtr domain, int *state, int *reason,
 static int
 hypervParseDomainDefStorageExtent(
             virDomainPtr domain, virDomainDefPtr def,
-            Msvm_ResourceAllocationSettingData *rasdEntry)
+            Msvm_ResourceAllocationSettingData *rasdEntry,
+            int *scsiDriveIndex ATTRIBUTE_UNUSED)
 {
     int result = -1;
     char **connData;    
@@ -792,8 +793,8 @@ hypervParseDomainDefStorageExtent(
         }
 
         /* Bus */
-        disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
-        //disk->dst =
+        disk->bus = VIR_DOMAIN_DISK_BUS_SCSI; // TODO
+        //disk->dst = // TODO
         def->disks[def->ndisks] = disk;
         def->ndisks++;
     }
@@ -808,12 +809,16 @@ static int
 hypervParseDomainDefDisk(
         virDomainPtr domain, virDomainDefPtr def,
         Msvm_ResourceAllocationSettingData *rasdEntry,
-        Msvm_ResourceAllocationSettingData *rasdEntryArrStart)
+        Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+        int *scsiDriveIndex)
 {
     int result = -1;
     char **hostResourceDataPath;
     char *hostResourceDataPathEscaped;    
     char driveNumberStr[11];    
+    int driveIndex = 0;
+    int ideControllerIndex = 0;
+    int scsiControllerIndex = 0;    
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDiskDefPtr disk;
     virBuffer query = VIR_BUFFER_INITIALIZER;
@@ -821,6 +826,17 @@ hypervParseDomainDefDisk(
     Msvm_DiskDrive *diskDrive = NULL;
     Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
 
+    /**
+     * The 'HostResource' field contains the reference to the physical/virtual
+     * disk (Msvm_DiskDrive) that this RASD entry points to. 
+     * 
+     * If this is empty, this drive is likely used as a virtual drive for 
+     * ISO/VHD files, for which the logic is handled in the 
+     * hypervParseDomainDefStorageExtent function.
+     *
+     * Example host resource entry:
+     *    HostResource = {"\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_DiskDrive.CreationClassName=\"Msvm_DiskDrive\",DeviceID=\"Microsoft:353B3BE8-310C-4cf4-839E-4E1B14616136\\\\3\",SystemCreationClassName=\"Msvm_ComputerSystem\",SystemName=\"WIN-S7J17Q4LBT7\""};
+     */
     if (rasdEntry->data->HostResource.count > 0) {           
         /* Define new disk */
         disk = virDomainDiskDefNew(priv->xmlopt);        
@@ -844,7 +860,16 @@ hypervParseDomainDefDisk(
             goto cleanup;
         }        
         
-        /* Find IDE/SCSI controller in RASD list. This is done by walking 
+        /**
+         * Index of drive relative to controller.
+         */
+        if (rasdEntry->data->Address == NULL) {
+            goto cleanup;
+        }
+
+        driveIndex = atoi(rasdEntry->data->Address);
+
+        /* Find parent IDE/SCSI controller in RASD list. This is done by walking 
          * through the entire device list and comparing the 'Parent' entry
          * of the disk RASD entry with the potential parent's 'InstanceID'.
          * 
@@ -856,20 +881,32 @@ hypervParseDomainDefDisk(
          *     Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\0
          */        
         virBufferFreeAndReset(&query);
-        
+                
         while (rasdEntryArr != NULL) {
             virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
             expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
             expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
         
-            if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {
-                if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {
+            if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+                if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {                             
+                    ideControllerIndex = atoi(rasdEntryArr->data->Address);
+                    
                     disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
+                    disk->dst = virIndexToDiskName(ideControllerIndex * 2 + driveIndex, "hd"); // max. 2 drives per IDE bus
                 } else if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
                     disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+                    disk->dst = virIndexToDiskName(scsiControllerIndex * 15 + *scsiDriveIndex, "sd");
+                    
+                    (*scsiDriveIndex)++;
                 }
             }            
-            
+
+            // Count SCSI controllers (IDE bus has 'Address' field)
+            if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                scsiControllerIndex++;
+            }
+
+            // Move to next item in linked list            
             rasdEntryArr = rasdEntryArr->next;
         }
 
@@ -958,6 +995,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     virDomainDefPtr def = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     int resourceType = -1;
+    int scsiDriveIndex = 0;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
@@ -1075,12 +1113,14 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         
         if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
             if (hypervParseDomainDefStorageExtent(domain, def, 
-                                                  resourceAllocationSettingData) < 0) {
+                                                  resourceAllocationSettingData,
+                                                  &scsiDriveIndex) < 0) {
                 goto cleanup;
             }
         } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK) {
             if (hypervParseDomainDefDisk(domain, def, resourceAllocationSettingData, 
-                                         resourceAllocationSettingDataArrStart) < 0) {
+                                         resourceAllocationSettingDataArrStart,
+                                         &scsiDriveIndex) < 0) {
                 
                 goto cleanup;
             }
