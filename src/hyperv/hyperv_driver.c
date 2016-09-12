@@ -771,15 +771,111 @@ static int
 hypervParseDomainDefStorageExtent(
             virDomainPtr domain, virDomainDefPtr def,
             Msvm_ResourceAllocationSettingData *rasdEntry,
+            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,            
             int *scsiDriveIndex ATTRIBUTE_UNUSED)
 {
     int result = -1;
     char **connData;    
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDiskDefPtr disk;
-    
+    char *expectedInstanceIdEndsWithStr;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ResourceAllocationSettingData *rasdEntryArr;
+    Msvm_ResourceAllocationSettingData *hardOrDvdDriveParentRasdEntry = NULL;    
+    int ideControllerIndex = 0;
+    int scsiControllerIndex = 0;    
+    int driveIndex = 0;
+
     if (rasdEntry->data->Connection.count > 0) {
+    
+    
+    
+    
+    
+    
+        /**
+         * Find parent hard drive or CD/DVD drive (resource type 22)
+         */
+        rasdEntryArr = rasdEntryArrStart;
+    
+        while (rasdEntryArr != NULL) {
+            virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
+            expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
+            expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
+        
+            if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+                hardOrDvdDriveParentRasdEntry = rasdEntryArr;
+                break;
+            }            
+
+            // Move to next item in linked list            
+            rasdEntryArr = rasdEntryArr->next;
+        }    
+        
+        
+    
+        if (hardOrDvdDriveParentRasdEntry == NULL) {
+            VIR_DEBUG("no parent for storage extent");
+            goto cleanup;
+        }
+        
+        
+
+        VIR_DEBUG("parent for storage extent %p", hardOrDvdDriveParentRasdEntry);
+
         disk = virDomainDiskDefNew(priv->xmlopt);
+
+    
+        /**
+         * Index of drive relative to controller.
+         */
+        if (hardOrDvdDriveParentRasdEntry->data->Address == NULL) {
+            goto cleanup;
+        }
+
+        driveIndex = atoi(hardOrDvdDriveParentRasdEntry->data->Address);    
+    
+    
+            VIR_DEBUG("drive index %d", driveIndex);
+
+    
+        rasdEntryArr = rasdEntryArrStart;
+
+        while (rasdEntryArr != NULL) {
+            virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
+            expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
+            expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
+        
+            if (virStringEndsWith(hardOrDvdDriveParentRasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+                if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {                             
+                    ideControllerIndex = atoi(rasdEntryArr->data->Address);
+                    
+                    disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
+                    disk->dst = virIndexToDiskName(ideControllerIndex * 2 + driveIndex, "hd"); // max. 2 drives per IDE bus
+                    break;
+                } else if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                    disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
+                    disk->dst = virIndexToDiskName(scsiControllerIndex * 15 + *scsiDriveIndex, "sd");
+                    
+                    (*scsiDriveIndex)++;
+                    break;
+                }
+            }            
+
+            // Count SCSI controllers (IDE bus has 'Address' field)
+            if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                scsiControllerIndex++;
+            }
+
+            // Move to next item in linked list            
+            rasdEntryArr = rasdEntryArr->next;
+        }    
+    
+    
+    
+    
+    
+    
         
         /* Type */
         virDomainDiskSetType(disk, VIR_STORAGE_TYPE_FILE);
@@ -793,8 +889,6 @@ hypervParseDomainDefStorageExtent(
         }
 
         /* Bus */
-        disk->bus = VIR_DOMAIN_DISK_BUS_SCSI; // TODO
-        //disk->dst = // TODO
         def->disks[def->ndisks] = disk;
         def->ndisks++;
     }
@@ -881,7 +975,10 @@ hypervParseDomainDefDisk(
          *     Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\0
          */        
         virBufferFreeAndReset(&query);
-                
+
+/*        hardDriveRasdEntry = hypervFindParentRasdEntryFromList(
+                                      rasdEntryArr, rasdEntry->data->Parent);*/
+
         while (rasdEntryArr != NULL) {
             virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
             expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
@@ -893,11 +990,13 @@ hypervParseDomainDefDisk(
                     
                     disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
                     disk->dst = virIndexToDiskName(ideControllerIndex * 2 + driveIndex, "hd"); // max. 2 drives per IDE bus
+                    break;
                 } else if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
                     disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
                     disk->dst = virIndexToDiskName(scsiControllerIndex * 15 + *scsiDriveIndex, "sd");
                     
                     (*scsiDriveIndex)++;
+                    break;
                 }
             }            
 
@@ -1114,6 +1213,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
             if (hypervParseDomainDefStorageExtent(domain, def, 
                                                   resourceAllocationSettingData,
+                                                  resourceAllocationSettingDataArrStart,
                                                   &scsiDriveIndex) < 0) {
                 goto cleanup;
             }
