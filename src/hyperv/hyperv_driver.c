@@ -768,6 +768,40 @@ hypervDomainGetState(virDomainPtr domain, int *state, int *reason,
 }
 
 static int
+hypervParseDomainDefFindParentRasd(
+            Msvm_ResourceAllocationSettingData *rasdEntry,
+            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+            Msvm_ResourceAllocationSettingData **rasdEntryParent)
+{
+    int result = -1;
+    char *expectedInstanceIdEndsWithStr;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
+    
+    while (rasdEntryArr != NULL) {
+        VIR_DEBUG("%s", rasdEntryArr->data->InstanceID);
+    
+        virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
+        expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
+        expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
+    
+        if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+            *rasdEntryParent = rasdEntryArr;
+            break;
+        }            
+
+        // Move to next item in linked list            
+        rasdEntryArr = rasdEntryArr->next;
+    }
+    
+    if (*rasdEntryParent != NULL) {    
+        result = 0;
+    }
+    
+    return result; 
+}
+
+static int
 hypervParseDomainDefStorageExtent(
             virDomainPtr domain, virDomainDefPtr def,
             Msvm_ResourceAllocationSettingData *rasdEntry,
@@ -781,59 +815,30 @@ hypervParseDomainDefStorageExtent(
     char *expectedInstanceIdEndsWithStr;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ResourceAllocationSettingData *rasdEntryArr;
-    Msvm_ResourceAllocationSettingData *hardOrDvdDriveParentRasdEntry = NULL;    
+    Msvm_ResourceAllocationSettingData *hddOrDvdParentRasdEntry = NULL;    
     int ideControllerIndex = 0;
     int scsiControllerIndex = 0;    
     int driveIndex = 0;
 
     if (rasdEntry->data->Connection.count > 0) {
-    
-    
-    
-    
-    
-    
-        /**
-         * Find parent hard drive or CD/DVD drive (resource type 22)
-         */
-        rasdEntryArr = rasdEntryArrStart;
-    
-        while (rasdEntryArr != NULL) {
-            virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
-            expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
-            expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
-        
-            if (virStringEndsWith(rasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
-                hardOrDvdDriveParentRasdEntry = rasdEntryArr;
-                break;
-            }            
-
-            // Move to next item in linked list            
-            rasdEntryArr = rasdEntryArr->next;
-        }    
-        
-        
-    
-        if (hardOrDvdDriveParentRasdEntry == NULL) {
-            VIR_DEBUG("no parent for storage extent");
+        if (hypervParseDomainDefFindParentRasd(rasdEntry, rasdEntryArrStart,
+                                               &hddOrDvdParentRasdEntry) < 0) {
+            VIR_DEBUG("Cannot find CD/DVD or HDD for storage extent entry. Skipping.");
             goto cleanup;
         }
-        
-        
-
-        VIR_DEBUG("parent for storage extent %p", hardOrDvdDriveParentRasdEntry);
-
+    
+    
         disk = virDomainDiskDefNew(priv->xmlopt);
 
     
         /**
          * Index of drive relative to controller.
          */
-        if (hardOrDvdDriveParentRasdEntry->data->Address == NULL) {
+        if (hddOrDvdParentRasdEntry->data->Address == NULL) {
             goto cleanup;
         }
 
-        driveIndex = atoi(hardOrDvdDriveParentRasdEntry->data->Address);    
+        driveIndex = atoi(hddOrDvdParentRasdEntry->data->Address);    
     
     
             VIR_DEBUG("drive index %d", driveIndex);
@@ -846,7 +851,7 @@ hypervParseDomainDefStorageExtent(
             expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
             expectedInstanceIdEndsWithStr = virStringReplace(expectedInstanceIdEndsWithStr, "\\", "\\\\");
         
-            if (virStringEndsWith(hardOrDvdDriveParentRasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
+            if (virStringEndsWith(hddOrDvdParentRasdEntry->data->Parent, expectedInstanceIdEndsWithStr)) {                
                 if (rasdEntryArr->data->ResourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {                             
                     ideControllerIndex = atoi(rasdEntryArr->data->Address);
                     
