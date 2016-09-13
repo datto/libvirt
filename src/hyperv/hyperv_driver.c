@@ -803,7 +803,17 @@ hypervParseDomainDefFindParentRasd(
     
     return result; 
 }
-    
+
+/**
+ * Converts a RASD entry to the 'dst' field in a disk definition (aka 
+ * virDomainDiskDefPtr), i.e. maps the ISCSI / IDE controller index/address
+ * and drive address/index to the guest drive name, e.g. sda, sdr, hda, hdb, ...
+ *
+ * WARNING, side effects:
+ *   This function increases the SCSI drive count in the 'scsiDriveIndex' 
+ *   parameter for every SCSI drive that is encountered. This is necessary
+ *   because Hyper-V / WMI does NOT return an address for the SCSI drive.
+ */
 static int
 hypervParseDomainDefSetDiskTarget(
             virDomainDiskDefPtr disk,
