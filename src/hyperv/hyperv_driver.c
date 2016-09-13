@@ -767,16 +767,21 @@ hypervDomainGetState(virDomainPtr domain, int *state, int *reason,
     return result;
 }
 
+/**
+ * Find parent RASD entry from RASD list. This is done by walking 
+ * through the entire device list and comparing the 'Parent' entry
+ * of the disk RASD entry with the potential parent's 'InstanceID'.
+ */  
 static int
 hypervParseDomainDefFindParentRasd(
             Msvm_ResourceAllocationSettingData *rasdEntry,
-            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+            Msvm_ResourceAllocationSettingData *rasdEntryListStart,
             Msvm_ResourceAllocationSettingData **rasdEntryParent)
 {
     int result = -1;
     char *expectedInstanceIdEndsWithStr;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
+    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryListStart;
     
     while (rasdEntryArr != NULL) {
         virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
@@ -798,13 +803,12 @@ hypervParseDomainDefFindParentRasd(
     
     return result; 
 }
-
-
+    
 static int
 hypervParseDomainDefSetDiskTarget(
             virDomainDiskDefPtr disk,
             Msvm_ResourceAllocationSettingData *rasdEntry,
-            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+            Msvm_ResourceAllocationSettingData *rasdEntryListStart,
             int *scsiDriveIndex)
 {
     int result = -1;
@@ -813,7 +817,7 @@ hypervParseDomainDefSetDiskTarget(
     int ideControllerIndex = 0;
     int scsiControllerIndex = 0;    
     int driveIndex = 0;
-    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryArrStart;
+    Msvm_ResourceAllocationSettingData *rasdEntryArr = rasdEntryListStart;
 
     /* Index of drive relative to controller. */
     if (rasdEntry->data->Address == NULL) {
@@ -822,18 +826,22 @@ hypervParseDomainDefSetDiskTarget(
     }
 
     driveIndex = atoi(rasdEntry->data->Address);
-
+      
     /* Find parent IDE/SCSI controller in RASD list. This is done by walking 
      * through the entire device list and comparing the 'Parent' entry
      * of the disk RASD entry with the potential parent's 'InstanceID'.
      * 
      * Example:
      *   Disk RASD entry 'Parent': 
-     *     \\WIN-S7J17Q4LBT7\root\virtualization:Msvm_ResourceAllocationSettingData.InstanceID="Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\\0"
+     *     \\WIN-S7J17Q4LBT7\root\virtualization:Msvm_ResourceAllocationSettingD
+     *     ata.InstanceID="Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\83F86
+     *     38B-8DCA-4152-9EDA-2CA8B33039B4\\0"
      * 
      *   Matching parent RASD entry 'InstanceID':
-     *     Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\0
-     */            
+     *     Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\83F8638B-8DCA-4152-9ED
+     *     A-2CA8B33039B4\0
+     */        
+     
     while (rasdEntryArr != NULL) {
         virBufferAsprintf(&query, "%s\"", rasdEntryArr->data->InstanceID);
         expectedInstanceIdEndsWithStr = virBufferContentAndReset(&query);                
@@ -870,11 +878,64 @@ hypervParseDomainDefSetDiskTarget(
     return result;    
 }
 
+/**
+ * This parses the RASD entry for resource type 21 (Microsoft Virtual Hard Disk,
+ * aka Hard Disk Image). This entry is used to represent VHD/ISO files that
+ * are attached to a virtual drive.
+ *
+ * This implementation will find the parent virtual drive (type 22), and then
+ * from there the IDE controller via the 'Parent' property, to fill the 
+ * 'dst' (<target dev=..> field.
+ *
+ * RASD entry hierarchy
+ * --------------------
+ * IDE controller (type 5) or SCSI Controller (type 6)
+ * `-- Hard Drive (type 22)
+ *     `-- Hard Disk Image (type 21, with 'Connection' field)
+ * 
+ * Example RASD entries (shortened)
+ * --------------------------------
+ * instance of Msvm_ResourceAllocationSettingData
+ * {
+ *  Caption = "Hard Disk Image";
+ *  Connection = {"E:\\somedisk.vhd"};
+ *  ElementName = "Hard Disk Image";
+ *  InstanceID = "Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\B93006DA-38DE-
+ *                4AE3-A847-9E094330C71F\\0\\1\\L";
+ *  Parent = "\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_ResourceAllocationS
+ *            ettingData.InstanceID=\"Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC6
+ *            6072\\\\B93006DA-38DE-4AE3-A847-9E094330C71F\\\\0\\\\1\\\\D\"";
+ *  ResourceType = 21;
+ *  ...
+ * };
+ *
+ * instance of Msvm_ResourceAllocationSettingData
+ * {
+ *  Address = "1";
+ *  Caption = "Hard Drive";
+ *  InstanceID = "Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\B93006DA-38DE-
+ *                4AE3-A847-9E094330C71F\\0\\1\\D";
+ *  Parent = "\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_ResourceAllocationS
+ *            ettingData.InstanceID=\"Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC6
+ *            6072\\\\B93006DA-38DE-4AE3-A847-9E094330C71F\\\\0\"";
+ *  ResourceType = 22;
+ *  ...
+ * };
+ *  
+ * instance of Msvm_ResourceAllocationSettingData
+ * {
+ *  Caption = "SCSI Controller";
+ *  InstanceID = "Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\B93006DA-38DE-
+ *                4AE3-A847-9E094330C71F\\0";
+ *  ResourceType = 6;
+ *  ...
+ * }
+ */
 static int
 hypervParseDomainDefStorageExtent(
             virDomainPtr domain, virDomainDefPtr def,
             Msvm_ResourceAllocationSettingData *rasdEntry,
-            Msvm_ResourceAllocationSettingData *rasdEntryArrStart,            
+            Msvm_ResourceAllocationSettingData *rasdEntryListStart,            
             int *scsiDriveIndex)
 {
     int result = -1;
@@ -884,11 +945,14 @@ hypervParseDomainDefStorageExtent(
     Msvm_ResourceAllocationSettingData *hddOrDvdParentRasdEntry = NULL;    
 
     if (rasdEntry->data->Connection.count > 0) {
+        VIR_DEBUG("Parsing device 'storage extent' (type %d)", 
+                  rasdEntry->data->ResourceType);
+    
         /* Define new disk */
         disk = virDomainDiskDefNew(priv->xmlopt);
 
         /* Find CD/DVD or HDD drive this entry is associated to */
-        if (hypervParseDomainDefFindParentRasd(rasdEntry, rasdEntryArrStart,
+        if (hypervParseDomainDefFindParentRasd(rasdEntry, rasdEntryListStart,
                                                &hddOrDvdParentRasdEntry) < 0) {
             VIR_DEBUG("Cannot find parent CD/DVD/HDD drive. Skipping.");
             goto cleanup;
@@ -896,7 +960,7 @@ hypervParseDomainDefStorageExtent(
 
         /* Target (dst and bus) */
         if (hypervParseDomainDefSetDiskTarget(disk, hddOrDvdParentRasdEntry,
-            rasdEntryArrStart, scsiDriveIndex) < 0) {
+            rasdEntryListStart, scsiDriveIndex) < 0) {
             VIR_DEBUG("Cannot set target. Skipping.");
             goto cleanup;
         }
@@ -936,11 +1000,56 @@ hypervParseDomainDefStorageExtent(
         return result;       
 }
 
+/**
+ * This parses the RASD entry for resource type 22 (Microsoft Synthetic Disk 
+ * Drive, aka Hard Drive). For passthru disks, this entry has a 'HostResource'
+ * property that points to the physical disk. If an ISO/VHD is mounted, 
+ * this property is not present.
+ *
+ * This implementation will find the parent IDE controller via the 'Parent'
+ * property, to fill the 'dst' (<target dev=..> field.
+ *
+ * RASD entry hierarchy
+ * --------------------
+ * IDE controller (type 5) or SCSI Controller (type 6)
+ * `-- Hard Drive (type 22, with property 'HostResource')
+ * 
+ * Example RASD entries (shortened)
+ * --------------------------------
+ *
+ * instance of Msvm_ResourceAllocationSettingData
+ * {
+ *  Address = "1";
+ *  ElementName = "Hard Drive";
+ *  HostResource = {"\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_DiskDrive.Cr
+ *                   eationClassName=\"Msvm_DiskDrive\",DeviceID=\"Microsoft:353
+ *                   B3BE8-310C-4cf4-839E-4E1B14616136\\\\NODRIVE\",SystemCreati
+ *                   onClassName=\"Msvm_ComputerSystem\",SystemName=\"WIN-S7J17Q
+ *                   4LBT7\""};
+ *  InstanceID = "Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\83F8638B-8DCA-
+ *                4152-9EDA-2CA8B33039B4\\1\\1\\D";
+ *  Parent = "\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_ResourceAllocationS
+ *            ettingData.InstanceID=\"Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC6
+ *            6072\\\\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\\\\1\"";
+ *  ResourceType = 22;
+ *  ...
+ * };
+ *
+ * instance of Msvm_ResourceAllocationSettingData
+ * {
+ *  Address = "1";
+ *  Caption = "IDE Controller 1";
+ *  InstanceID = "Microsoft:5E855AD2-5FD1-457E-A757-E48D7EC66072\\83F8638B-8DCA-
+ *                4152-9EDA-2CA8B33039B4\\1";
+ *  ResourceType = 5;
+ *  ...
+ *  };
+ */
 static int
 hypervParseDomainDefDisk(
         virDomainPtr domain, virDomainDefPtr def,
         Msvm_ResourceAllocationSettingData *rasdEntry,
-        Msvm_ResourceAllocationSettingData *rasdEntryArrStart,
+        Msvm_ResourceAllocationSettingData *rasdEntryListStart,
         int *scsiDriveIndex)
 {
     int result = -1;
@@ -961,9 +1070,15 @@ hypervParseDomainDefDisk(
      * hypervParseDomainDefStorageExtent function.
      *
      * Example host resource entry:
-     *    HostResource = {"\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_DiskDrive.CreationClassName=\"Msvm_DiskDrive\",DeviceID=\"Microsoft:353B3BE8-310C-4cf4-839E-4E1B14616136\\\\3\",SystemCreationClassName=\"Msvm_ComputerSystem\",SystemName=\"WIN-S7J17Q4LBT7\""};
+     *    HostResource = {"\\\\WIN-S7J17Q4LBT7\\root\\virtualization:Msvm_DiskDr
+     *    ive.CreationClassName=\"Msvm_DiskDrive\",DeviceID=\"Microsoft:353B3BE8
+     *    -310C-4cf4-839E-4E1B14616136\\\\3\",SystemCreationClassName=\"Msvm_Com
+     *    puterSystem\",SystemName=\"WIN-S7J17Q4LBT7\""};
      */
-    if (rasdEntry->data->HostResource.count > 0) {           
+    if (rasdEntry->data->HostResource.count > 0) {  
+        VIR_DEBUG("Parsing device 'disk' (type %d)", 
+                  rasdEntry->data->ResourceType);
+             
         /* Define new disk */
         disk = virDomainDiskDefNew(priv->xmlopt);        
 
@@ -988,7 +1103,7 @@ hypervParseDomainDefDisk(
         
         /* Target (dst and bus) */
         if (hypervParseDomainDefSetDiskTarget(disk, rasdEntry,
-            rasdEntryArrStart, scsiDriveIndex) < 0) {
+            rasdEntryListStart, scsiDriveIndex) < 0) {
             VIR_DEBUG("Cannot set target. Skipping.");
             goto cleanup;
         }        
@@ -1023,6 +1138,16 @@ hypervParseDomainDefDisk(
         return result;
 }
 
+/**
+ * Generates the libvirt XML representation by filling the virDomainPtr struct.
+ * 
+ * For Hyper-V, this is done by querying WMI and mapping it to the libvirt 
+ * structures. Relevant WMI tables:
+ *   - Msvm_VirtualSystemSettingData: Information about the VM
+ *   - Msvm_MemorySettingData: Memory details about a VM
+ *   - Msvm_ProcessorSettingData: CPU count and such for a VM
+ *   - Msvm_ResourceAllocationSettingData: All devices for a VM (esp. disks)
+ */
 static char *
 hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 {
@@ -1037,19 +1162,21 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
     Msvm_MemorySettingData *memorySettingData = NULL;
-    Msvm_ResourceAllocationSettingData *resourceAllocationSettingData = NULL;
-    Msvm_ResourceAllocationSettingData *resourceAllocationSettingDataArrStart = NULL;    
+    Msvm_ResourceAllocationSettingData *rasdEntry = NULL;
+    Msvm_ResourceAllocationSettingData *rasdEntryListStart = NULL;    
 
     /* Flags checked by virDomainDefFormat */
 
-    if (!(def = virDomainDefNew()))
+    if (!(def = virDomainDefNew())) {
         goto cleanup;
+    }
 
     virUUIDFormat(domain->uuid, uuid_string);
 
     /* Get Msvm_ComputerSystem */
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
+    }
 
     /* Get Msvm_VirtualSystemSettingData */
     virBufferAsprintf(&query,
@@ -1125,7 +1252,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                       "ResultClass = Msvm_ResourceAllocationSettingData",
                       virtualSystemSettingData->data->InstanceID);
     if (hypervGetMsvmResourceAllocationSettingDataList(priv, &query, 
-                                                       &resourceAllocationSettingData) < 0) {
+                                                       &rasdEntry) < 0) {
         goto cleanup;
     }
 
@@ -1140,30 +1267,39 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     def->ndisks = 0;
     def->ncontrollers = 0;
     
-    resourceAllocationSettingDataArrStart = resourceAllocationSettingData;
+    /* Loop over all VM resources (RASD entries), and parse them depending
+     * on the resource type. 
+     *
+     * This seems easy, but is actually very tricky, because the list we
+     * retrieve here actually represents a device tree through the 'Parent'
+     * fields.
+     */
+    
+    rasdEntryListStart = rasdEntry;
 
-    while (resourceAllocationSettingData != NULL) {
-        resourceType = resourceAllocationSettingData->data->ResourceType;
-        VIR_DEBUG("device type %d %p", resourceAllocationSettingData->data->ResourceType, 
-            resourceAllocationSettingDataArrStart);
-        
-        if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+    while (rasdEntry != NULL) {
+        resourceType = rasdEntry->data->ResourceType;
+                
+        if (resourceType == 
+            MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+            /* Get disk or CD/DVD drive backed by a file (VHD/ISO) */        
             if (hypervParseDomainDefStorageExtent(domain, def, 
-                                                  resourceAllocationSettingData,
-                                                  resourceAllocationSettingDataArrStart,
+                                                  rasdEntry,
+                                                  rasdEntryListStart,
                                                   &scsiDriveIndex) < 0) {
                 goto cleanup;
             }
         } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK) {
-            if (hypervParseDomainDefDisk(domain, def, resourceAllocationSettingData, 
-                                         resourceAllocationSettingDataArrStart,
+            /* Get disk backed by a raw disk on the host */        
+            if (hypervParseDomainDefDisk(domain, def, rasdEntry, 
+                                         rasdEntryListStart,
                                          &scsiDriveIndex) < 0) {
                 
                 goto cleanup;
             }
         }
         
-        resourceAllocationSettingData = resourceAllocationSettingData->next;
+        rasdEntry = rasdEntry->next;
     }
 
     /* Fill struct */
@@ -1182,22 +1318,26 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         return NULL;
     }
 
-    if (VIR_STRDUP(def->name, computerSystem->data->ElementName) < 0)
+    if (VIR_STRDUP(def->name, computerSystem->data->ElementName) < 0) {
         goto cleanup;
+    }
 
-    if (VIR_STRDUP(def->description, virtualSystemSettingData->data->Notes) < 0)
+    if (VIR_STRDUP(def->description, virtualSystemSettingData->data->Notes) < 0) {
         goto cleanup;
+    }
 
     virDomainDefSetMemoryTotal(def, memorySettingData->data->Limit * 1024); /* megabyte to kilobyte */
     def->mem.cur_balloon = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
 
     if (virDomainDefSetVcpusMax(def,
-                                processorSettingData->data->VirtualQuantity) < 0)
+                                processorSettingData->data->VirtualQuantity) < 0) {
         goto cleanup;
+    }
 
     if (virDomainDefSetVcpus(def,
-                             processorSettingData->data->VirtualQuantity) < 0)
+                             processorSettingData->data->VirtualQuantity) < 0) {
         goto cleanup;
+    }
 
     def->os.type = VIR_DOMAIN_OSTYPE_HVM;
 
@@ -1241,8 +1381,9 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
-        if (VIR_STRDUP(names[count], computerSystem->data->ElementName) < 0)
+        if (VIR_STRDUP(names[count], computerSystem->data->ElementName) < 0) {
             goto cleanup;
+        }
 
         ++count;
 
@@ -1309,8 +1450,9 @@ hypervDomainCreateWithFlags(virDomainPtr domain, unsigned int flags)
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
+    }
 
     if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
@@ -1389,8 +1531,9 @@ hypervDomainIsActive(virDomainPtr domain)
     hypervPrivate *priv = domain->conn->privateData;
     Msvm_ComputerSystem *computerSystem = NULL;
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
+    }
 
     result = hypervIsMsvmComputerSystemActive(computerSystem, NULL) ? 1 : 0;
 
@@ -1409,15 +1552,11 @@ hypervDomainIsPersistent(virDomainPtr domain ATTRIBUTE_UNUSED)
     return 1;
 }
 
-
-
 static int
 hypervDomainIsUpdated(virDomainPtr domain ATTRIBUTE_UNUSED)
 {
     return 0;
 }
-
-
 
 static int
 hypervDomainManagedSave(virDomainPtr domain, unsigned int flags)
@@ -1448,8 +1587,6 @@ hypervDomainManagedSave(virDomainPtr domain, unsigned int flags)
     return result;
 }
 
-
-
 static int
 hypervDomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags)
 {
@@ -1459,8 +1596,9 @@ hypervDomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags)
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
+    }
 
     result = computerSystem->data->EnabledState ==
              MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED ? 1 : 0;
@@ -1482,8 +1620,9 @@ hypervDomainManagedSaveRemove(virDomainPtr domain, unsigned int flags)
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
+    }
 
     if (computerSystem->data->EnabledState !=
         MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED) {
@@ -1533,8 +1672,9 @@ hypervConnectListAllDomains(virConnectPtr conn,
          !MATCH(VIR_CONNECT_LIST_DOMAINS_NO_AUTOSTART)) ||
         (MATCH(VIR_CONNECT_LIST_DOMAINS_HAS_SNAPSHOT) &&
          !MATCH(VIR_CONNECT_LIST_DOMAINS_NO_SNAPSHOT))) {
-        if (domains && VIR_ALLOC_N(*domains, 1) < 0)
+        if (domains && VIR_ALLOC_N(*domains, 1) < 0) {
             goto cleanup;
+        }
 
         ret = 0;
         goto cleanup;
