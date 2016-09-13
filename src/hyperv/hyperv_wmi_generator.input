@@ -1091,3 +1091,64 @@ class Msvm_Keyboard_2012
     uint16   Password
     boolean  UnicodeSupported
 end
+
+class Msvm_DiskDrive
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    string   Name
+    uint16   OperationalStatus[]
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    uint16   EnabledState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    datetime TimeOfLastStateChange
+    string   SystemCreationClassName
+    string   SystemName
+#    uint16   CreationClassName  # Microsoft documentation is wrong!
+    string   CreationClassName
+    string   DeviceID
+    boolean  PowerManagementSupported
+    uint16   PowerManagementCapabilities[]
+    uint16   Availability
+    uint16   StatusInfo
+    uint32   LastErrorCode
+    string   ErrorDescription
+    boolean  ErrorCleared
+    string   OtherIdentifyingInfo[]
+    uint64   PowerOnHours
+    uint64   TotalPowerOnHours
+    string   IdentifyingDescriptions[]
+    uint16   AdditionalAvailability[]
+    uint64   MaxQuiesceTime
+    uint16   LocationIndicator
+    uint16   Capabilities[]
+    string   CapabilityDescriptions[]
+    string   ErrorMethodology
+    string   CompressionMethod
+    uint32   NumberOfMediaSupported
+    uint64   MaxMediaSize
+    uint64   DefaultBlockSize
+    uint64   MaxBlockSize
+    uint64   MinBlockSize
+    boolean  NeedsCleaning
+    boolean  MediaIsLocked
+    uint16   Security
+    datetime LastCleaned
+    uint64   MaxAccessTime
+    uint32   UncompressedDataRate
+    uint64   LoadTime
+    uint64   UnloadTime
+    uint64   MountCount
+    datetime TimeOfLastMount
+    uint64   TotalMountTime
+    string   UnitsDescription
+    uint64   MaxUnitsBeforeCleaning
+    uint64   UnitsUsed
+    uint32   DriveNumber
+end
+
