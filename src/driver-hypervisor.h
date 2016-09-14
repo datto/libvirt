@@ -1251,6 +1251,10 @@ typedef int
                              int state,
                              unsigned int flags);
 
+typedef int
+(*virDrvDomainSnapshot)(virDomainPtr domain,
+                        unsigned int flags);
+
 typedef struct _virHypervisorDriver virHypervisorDriver;
 typedef virHypervisorDriver *virHypervisorDriverPtr;
 
