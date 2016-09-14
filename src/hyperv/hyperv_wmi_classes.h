@@ -45,6 +45,19 @@
 # define MSVM_COMPUTERSYSTEM_WQL_INACTIVE \
     "(EnabledState = 0 or EnabledState = 3 or EnabledState = 32769) "
 
+# define MSVM_COMPUTERSYSTEM_2012_WQL_VIRTUAL \
+    "Description = \"Microsoft Virtual Machine\" "
+
+# define MSVM_COMPUTERSYSTEM_2012_WQL_PHYSICAL \
+    "Description = \"Microsoft Hosting Computer System\" "
+    
+# define MSVM_COMPUTERSYSTEM_2012_WQL_ACTIVE \
+    "(EnabledState != 0 and EnabledState != 3) "
+
+# define MSVM_COMPUTERSYSTEM_2012_WQL_INACTIVE \
+    "(EnabledState = 0 or EnabledState = 3) "
+
+/* https://msdn.microsoft.com/en-us/library/cc136822(v=vs.85).aspx */
 enum _Msvm_ComputerSystem_EnabledState {
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN = 0,          /* inactive */
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED = 2,          /*   active */
@@ -59,6 +72,22 @@ enum _Msvm_ComputerSystem_EnabledState {
     MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING = 32777      /*   active */
 };
 
+/* https://msdn.microsoft.com/en-us/library/hh850116(v=vs.85).aspx */
+enum _Msvm_ComputerSystem_2012_EnabledState {
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_UNKNOWN = 0,             /* inactive */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_OTHER = 1,               /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED = 2,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DISABLED = 3,            /* inactive */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_SHUTTING_DOWN = 4,       /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_NOT_APPLICABLE = 5,      /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_ENABLED_BUT_OFFLINE = 6, /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_IN_TEST = 7,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_DEFERRED = 8,            /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_QUIESCE = 9,             /*   active */
+    MSVM_COMPUTERSYSTEM_2012_ENABLEDSTATE_STARTING = 10,           /*   active */
+};
+
+/* https://msdn.microsoft.com/en-us/library/cc723874(v=vs.85).aspx */
 enum _Msvm_ComputerSystem_RequestedState {
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED = 2,
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED = 3,
@@ -67,7 +96,12 @@ enum _Msvm_ComputerSystem_RequestedState {
     MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_SUSPENDED = 32769,
 };
 
-
+/* https://msdn.microsoft.com/en-us/library/hh850279(v=vs.85).aspx */
+enum _Msvm_ComputerSystem_2012_RequestedState {
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RUNNING = 2,
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_OFF = 3,
+    MSVM_COMPUTERSYSTEM_2012_REQUESTEDSTATE_RESET = 11,
+};
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ConcreteJob

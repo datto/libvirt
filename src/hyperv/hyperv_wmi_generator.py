@@ -61,24 +61,28 @@ class Class:
 
     def generate_classes_header(self):
         name_upper = self.name.upper()
-
+        class_name = self.name
+        if self.name.endswith("_2012"):
+            class_name = class_name[:-5]
         header = separator
         header += " * %s\n" % self.name
         header += " */\n"
         header += "\n"
         header += "#define %s_RESOURCE_URI \\\n" % name_upper
 
-        if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
+        if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/%s\"\n" % self.name
+        elif self.name.endswith("_2012"):
+            header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/%s\"\n" % class_name
         else:
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/%s\"\n" % self.name
 
         header += "\n"
         header += "#define %s_CLASSNAME \\\n" % name_upper
-        header += "    \"%s\"\n" % self.name
+        header += "    \"%s\"\n" % class_name
         header += "\n"
         header += "#define %s_WQL_SELECT \\\n" % name_upper
-        header += "    \"select * from %s \"\n" % self.name
+        header += "    \"select * from %s \"\n" % class_name
         header += "\n"
         header += "struct _%s_Data {\n" % self.name
 
@@ -101,6 +105,28 @@ class Class:
         return header
 
 
+    def generate_cimtypes_header2(self):
+        header = separator
+        header += " * %s\n" % self.name
+        header += " */\n"
+        header += "\n"
+        header += "CimTypes cimTypes_%s[] = {\n" % self.name
+        for property in self.properties:
+            header += property.generate_cimtypes_header2()
+            header += ",\n"
+        header += "\t{ \"\", \"\", 0 },\n};\n\n"
+
+        return header
+
+
+    def generate_cimtypes_header3(self):
+        header = "	{ \"%s" % self.name
+        header += "\", cimTypes_%s" % self.name
+        header += " },\n"
+
+        return header
+
+
     def generate_source(self):
         name_upper = self.name.upper()
 
@@ -113,8 +139,10 @@ class Class:
                   % (self.name.replace("_", ""), self.name)
         source += "{\n"
 
-        if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
+        if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
             source += "    return hypervEnumAndPull(priv, query, ROOT_CIMV2,\n"
+        elif self.name.endswith("_2012"):
+            source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION_V2,\n"
         else:
             source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION,\n"
 
@@ -158,6 +186,8 @@ class Property:
                "int16"    : "INT16",
                "int32"    : "INT32",
                "int64"    : "INT64",
+               "sint8"    : "INT8",
+               "sint16"   : "INT16",
                "uint8"    : "UINT8",
                "uint16"   : "UINT16",
                "uint32"   : "UINT32",
@@ -188,6 +218,17 @@ class Property:
         else:
             return "    SER_NS_%s(%s_RESOURCE_URI, \"%s\", 1),\n" \
                    % (Property.typemap[self.type], class_name.upper(), self.name)
+
+
+    def generate_cimtypes_header2(self):
+        header = "	{ \"%s" % self.name
+        header += "\", \"%s\", " % self.type
+        if self.is_array:
+            header += "true"
+        else:
+            header += "false"
+        header += " }"
+        return header
 
 
 
@@ -239,6 +280,22 @@ def parse_class(block):
     return Class(name=name, properties=properties)
 
 
+def generate_cimtypes_header1():
+    header = "struct cimTypes{\n"
+    header += "	const char *name;\n"
+    header += "	const char *type;\n"
+    header += "	bool isArray;\n"
+    header += "};\n"
+    header += "typedef struct cimTypes CimTypes;\n\n"
+    header += "struct cimClasses{\n"
+    header += "	const char *name;\n"
+    header += "	CimTypes *cimTypesPtr;\n"
+    header += "};\n"
+    header += "typedef struct cimClasses CimClasses;\n\n"
+
+    return header
+
+
 
 def main():
     if "srcdir" in os.environ:
@@ -253,6 +310,7 @@ def main():
     classes_typedef = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.typedef"))
     classes_header = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.h"))
     classes_source = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.c"))
+    cimtypes_header = open_and_print(os.path.join(output_dirname, "hyperv_wmi_cimtypes.generated.h"))
 
     # parse input file
     number = 0
@@ -295,6 +353,9 @@ def main():
     classes_header.write(notice)
     classes_source.write(notice)
 
+    cimtypes_header.write(notice)
+    cimtypes_header.write(generate_cimtypes_header1())
+
     names = classes_by_name.keys()
     names.sort()
 
@@ -304,6 +365,12 @@ def main():
         classes_typedef.write(classes_by_name[name].generate_classes_typedef())
         classes_header.write(classes_by_name[name].generate_classes_header())
         classes_source.write(classes_by_name[name].generate_classes_source())
+        cimtypes_header.write(classes_by_name[name].generate_cimtypes_header2())
+
+    cimtypes_header.write("CimClasses cimClasses[] = {\n")
+    for name in names:
+        cimtypes_header.write(classes_by_name[name].generate_cimtypes_header3())
+    cimtypes_header.write("\t{ \"\", NULL },\n};\n")
 
 
 

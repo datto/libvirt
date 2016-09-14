@@ -23,6 +23,11 @@
 #ifndef __HYPERV_DRIVER_H__
 # define __HYPERV_DRIVER_H__
 
+#define HYPERV_SCREENSHOT_FILENAME_LENGTH 24
+#define UNUSED(x) (void)(x)
+
 int hypervRegister(void);
+
+char *num2str(unsigned long value);
 
 #endif /* __HYPERV_DRIVER_H__ */
