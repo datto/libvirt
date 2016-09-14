@@ -1069,3 +1069,24 @@ virStringToUpper(char **dst, const char *src)
     *dst = cap;
     return 1;
 }
+
+/**
+ * virStringEndsWith:
+ * @str: haystack to check against
+ * @suffix: needle to check if matches the string's suffix
+ *
+ * Test if a string ends with a suffix.
+ *
+ * Returns >0 if str ends with suffix, 0 otherwise
+ */
+int 
+virStringEndsWith(const char *str, const char *suffix)
+{
+    if (!str || !suffix)
+        return 0;
+    size_t lenstr = strlen(str);
+    size_t lensuffix = strlen(suffix);
+    if (lensuffix >  lenstr)
+        return 0;
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}

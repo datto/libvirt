@@ -1,5 +1,6 @@
 /*
- * hyperv_util.h: utility functions for the Microsoft Hyper-V driver
+ * hyperv_network_driver.h: network driver functions for managing
+ *                          Microsoft Hyper-V host networks
  *
  * Copyright (C) 2011 Matthias Bolte <matthias.bolte@googlemail.com>
  *
@@ -19,23 +20,11 @@
  *
  */
 
-#ifndef __HYPERV_UTIL_H__
-# define __HYPERV_UTIL_H__
+#ifndef __HYPERV_NETWORK_DRIVER_H__
+# define __HYPERV_NETWORK_DRIVER_H__
 
-# include "internal.h"
-# include "viruri.h"
+int hypervNetworkRegister(void);
 
-#define HYPERV_VERSION_2008 "6.1"
-#define HYPERV_VERSION_2012 "6.3"
+extern virNetworkDriver hypervNetworkDriver;
 
-typedef struct _hypervParsedUri hypervParsedUri;
-
-struct _hypervParsedUri {
-    char *transport;
-};
-
-int hypervParseUri(hypervParsedUri **parsedUri, virURIPtr uri);
-
-void hypervFreeParsedUri(hypervParsedUri **parsedUri);
-
-#endif /* __HYPERV_UTIL_H__ */
+#endif /* __HYPERV_NETWORK_DRIVER_H__ */

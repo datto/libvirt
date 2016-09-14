@@ -30,6 +30,17 @@
 # include "openwsman.h"
 
 
+#define ROOT_CIMV2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
+
+#define ROOT_VIRTUALIZATION \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
+
+#define ROOT_VIRTUALIZATION_V2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/*"
+
+
+void rmSubstr(char *str, const char *toRemove);
 
 typedef struct _hypervObject hypervObject;
 
@@ -94,6 +105,71 @@ const char *hypervReturnCodeToString(int returnCode);
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * hypervInvokeMethod
+ *   Function to invoke WSMAN request with simple, EPR or embedded parameters
+ */
+
+enum _PARAM_Type {
+    SIMPLE_PARAM = 0,
+    EPR_PARAM = 1,
+    EMBEDDED_PARAM = 2,
+};
+
+typedef struct _invokeXmlParam invokeXmlParam;
+struct _invokeXmlParam{
+        const char *name;
+        int type;
+	void *param;
+};
+
+typedef struct _eprParam eprParam;
+struct _eprParam{
+        virBufferPtr query;
+	const char *wmiProviderURI;
+};
+
+typedef struct _simpleParam simpleParam;
+struct _simpleParam{
+	const char *value;
+};
+
+typedef struct _properties_t properties_t;
+struct _properties_t{
+        const char *name;
+        const char *val;
+};
+
+typedef struct _embeddedParam embeddedParam;
+struct _embeddedParam{
+	const char *instanceName;
+	properties_t *prop_t;
+	int nbProps;
+};
+
+
+int
+hypervInvokeMethod(hypervPrivate *priv,
+                   invokeXmlParam *parameters,
+                   int nbParameters,
+                   const char* methodName,
+                   const char* providerURI,
+                   const char *selector);
+
+typedef struct _thumbnailImage thumbnailImage;
+struct _thumbnailImage{
+	const char *data;
+	int length;
+};
+
+thumbnailImage *
+hypervGetVirtualSystemThumbnailImage(hypervPrivate *priv,
+									 invokeXmlParam *param_t,
+									 int nbParameters,
+                                     const char* providerURI,
+									 const char *selector);
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ComputerSystem
  */
 
@@ -114,6 +190,40 @@ int hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
                                        Msvm_ComputerSystem **computerSystem);
 
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_VirtualSwitch
+ */
+
+int hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
+		Msvm_VirtualSwitch *virtualSwitch, virNetworkPtr *network);
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_VirtualSwitch
+ */
+
+int hypervMsvmVirtualSwitchToNetwork(virConnectPtr conn,
+		Msvm_VirtualSwitch *virtualSwitch, virNetworkPtr *network);
+
+
+int hypervMsvmVirtualHardDiskSettingFromDomain(virDomainPtr domain,
+                                        Msvm_VirtualHardDiskSettingData **virtualHardDisk);
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_ResourceAllocationSettingData
+ */
+
+/* https://msdn.microsoft.com/en-us/library/cc136877(v=vs.85).aspx */
+enum _Msvm_ResourceAllocationSettingData_ResourceType {
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER = 5,
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA = 6,
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_CD_DRIVE = 15,    
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DVD_DRIVE = 16,        
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT = 21,
+    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK = 22,
+};
 
 # include "hyperv_wmi.generated.h"
 
