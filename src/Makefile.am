@@ -889,6 +889,8 @@ ESX_DRIVER_EXTRA_DIST =							\
 HYPERV_DRIVER_SOURCES =									\
 		hyperv/hyperv_private.h							\
 		hyperv/hyperv_driver.c hyperv/hyperv_driver.h				\
+		hyperv/hyperv_driver_2012.c hyperv/hyperv_driver_2012.h \
+		hyperv/hyperv_network_driver.c hyperv/hyperv_network_driver.h \
 		hyperv/hyperv_util.c hyperv/hyperv_util.h				\
 		hyperv/hyperv_wmi.c hyperv/hyperv_wmi.h					\
 		hyperv/hyperv_wmi_classes.c hyperv/hyperv_wmi_classes.h			\
