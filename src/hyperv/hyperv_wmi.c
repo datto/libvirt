@@ -27,6 +27,7 @@
 
 #include "internal.h"
 #include "virerror.h"
+#include "virlog.h"
 #include "datatypes.h"
 #include "viralloc.h"
 #include "viruuid.h"
@@ -35,6 +36,8 @@
 #include "hyperv_wmi.h"
 #include "virstring.h"
 #include "hyperv_wmi_cimtypes.generated.h"
+
+VIR_LOG_INIT("hyperv.hyperv_wmi");
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
@@ -193,6 +196,7 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
 
         if (ws_xml_get_child(node, 0, resourceUri, className) == NULL)
             break;
+        VIR_DEBUG("deserialize: %s, %s, %p", className, resourceUri, &node);
 
         data = ws_deserialize(serializerContext, node, serializerInfo,
                               className, resourceUri, NULL, 0, 0);

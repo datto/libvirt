@@ -27,7 +27,7 @@
 #define UNUSED(x) (void)(x)
 
 int hypervRegister(void);
-
+            
 char *num2str(unsigned long value);
 
 #endif /* __HYPERV_DRIVER_H__ */

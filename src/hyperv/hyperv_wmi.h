@@ -215,6 +215,12 @@ int hypervMsvmVirtualHardDiskSettingFromDomain(virDomainPtr domain,
  * Msvm_ResourceAllocationSettingData
  */
 
+/* Normally this is auto-generated, but we'll reuse the 2008 struct for RASD,
+ * to reuse the 2008 code. */
+ 
+#define MSVM_RESOURCEALLOCATIONSETTINGDATA_2012_RESOURCE_URI \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/Msvm_ResourceAllocationSettingData" 
+
 /* https://msdn.microsoft.com/en-us/library/cc136877(v=vs.85).aspx */
 enum _Msvm_ResourceAllocationSettingData_ResourceType {
     MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER = 5,

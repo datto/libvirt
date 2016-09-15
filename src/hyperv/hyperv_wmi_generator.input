@@ -849,7 +849,6 @@ class Msvm_VirtualSwitch
 	uint32 MaxChimneyOffloads
 end
 
-
 class Msvm_ResourceAllocationSettingData
 	string  Caption
 	string  Description
@@ -872,9 +871,35 @@ class Msvm_ResourceAllocationSettingData
 	string  Connection[]
 	string  Address
 	uint16  MappingBehavior
-	string  VirtualSystemIdentifiers[]
+	#string  VirtualSystemIdentifiers[]
 end
 
+class Msvm_ResourceAllocationSettingData_2012
+	string  Caption
+	string  Description
+	string  InstanceID
+	string  ElementName
+	uint16  ResourceType
+	string  OtherResourceType
+	string  ResourceSubType
+	string  PoolID
+	uint16  ConsumerVisibility
+	string  HostResource[]
+	string  AllocationUnits
+	uint64  VirtualQuantity
+	uint64  Reservation
+	uint64  Limit
+	uint32  Weight
+	boolean AutomaticAllocation
+	boolean AutomaticDeallocation
+	string  Parent
+	string  Connection[]
+	string  Address
+	uint16  MappingBehavior
+	string  AddressOnParent
+	string  VirtualQuantityUnits
+	string  VirtualSystemIdentifiers[]
+end
 
 class Msvm_AllocationCapabilities
 	string Caption

@@ -1,7 +1,8 @@
 #include "hyperv_driver_2012.h"
+#include "hyperv_driver_shared.h"
 #include "virkeycode.h"
 
-VIR_LOG_INIT("hyperv.hyperv_driver2012");
+VIR_LOG_INIT("hyperv.hyperv_driver_2012");
 
 static int
 hypervMsvmComputerSystemEnabledStateToDomainState2012(
@@ -707,8 +708,9 @@ hypervDomainUndefineFlags2012(virDomainPtr domain, unsigned int flags ATTRIBUTE_
 
     /* Create invokeXmlParam tab */
     nb_params = 1;
-    if (VIR_ALLOC_N(params, nb_params) < 0)
+    if (VIR_ALLOC_N(params, nb_params) < 0) {
         goto cleanup;
+    }
     (*params).name = "AffectedSystem";
     (*params).type = EPR_PARAM;
     (*params).param = &eprparam;
@@ -743,6 +745,8 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
     char *xml = NULL;
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDefPtr def = NULL;
+    int resourceType = -1;
+    int scsiDriveIndex = 0;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     const char **notesArr;
     char **noteStrPtr;
@@ -752,7 +756,8 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
     Msvm_VirtualSystemSettingData_2012 *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData_2012 *processorSettingData = NULL;
     Msvm_MemorySettingData_2012 *memorySettingData = NULL;
-    // Msvm_VirtualHardDiskSettingData_2012 *hardDiskSettingData = NULL;
+    Msvm_ResourceAllocationSettingData *rasdEntry = NULL;
+    Msvm_ResourceAllocationSettingData *rasdEntryListStart = NULL;    
 
     /* Flags checked by virDomainDefFormat */
 
@@ -821,7 +826,6 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-
     if (memorySettingData == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
@@ -829,6 +833,116 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
                        computerSystem->data->ElementName);
         goto cleanup;
     }
+    
+    /* Get Msvm_ResourceAllocationSettingData (devices of the VM) */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+                      "ResultClass = Msvm_ResourceAllocationSettingData",
+                      virtualSystemSettingData->data->InstanceID);
+
+    /* hypervEnumAndPull() replaces hypervGetMsvmResourceAllocationSettingDataList()
+     * so that the 2008 struct can be used. While ugly, this prevents lots
+     * of duplicate code. */
+    
+    if (hypervEnumAndPull(priv, &query, ROOT_VIRTUALIZATION_V2,
+                          Msvm_ResourceAllocationSettingData_2012_Data_TypeInfo,
+                          MSVM_RESOURCEALLOCATIONSETTINGDATA_2012_RESOURCE_URI,
+                          MSVM_RESOURCEALLOCATIONSETTINGDATA_2012_CLASSNAME,
+                          (hypervObject **) &rasdEntry) < 0) {
+                             
+         goto cleanup;
+     }
+ 
+    if (VIR_ALLOC_N(def->disks, 66) < 0) { // TODO This is really dirty!
+        goto cleanup;
+    }
+        
+    def->ndisks = 0;
+    
+    /* Loop over all VM resources (RASD entries), and parse them depending
+     * on the resource type. 
+     *
+     * This seems easy, but is actually very tricky, because the list we
+     * retrieve here actually represents a device tree through the 'Parent'
+     * fields.
+     */
+    
+    rasdEntryListStart = rasdEntry;
+
+
+/*
+
+
+instance of Msvm_StorageAllocationSettingData
+{
+	Access = NULL;
+	Address = NULL;
+	AddressOnParent = NULL;
+	AllocationUnits = "count";
+	AutomaticAllocation = TRUE;
+	AutomaticDeallocation = TRUE;
+	Caption = "Hard Disk Image";
+	Connection = NULL;
+	ConsumerVisibility = 3;
+	Description = "Settings for the Microsoft Hard Disk Image.";
+	ElementName = "Hard Disk Image";
+	HostExtentName = NULL;
+	HostExtentNameFormat = NULL;
+	HostExtentNameNamespace = NULL;
+	HostExtentStartingAddress = NULL;
+	HostResource = {"C:\\Users\\Public\\Documents\\Hyper-V\\Virtual Hard Disks\\phil1.vhdx"};
+	HostResourceBlockSize = NULL;
+	InstanceID = "Microsoft:AD3CDDE5-1943-47A6-936F-6058C4BB3C85\\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\\0\\1\\L";
+	IOPSAllocationUnits = "count(normalized I/O) / second";
+	IOPSLimit = "0";
+	IOPSReservation = "0";
+	Limit = "1";
+	MappingBehavior = NULL;
+	OtherHostExtentNameFormat = NULL;
+	OtherHostExtentNameNamespace = NULL;
+	OtherResourceType = NULL;
+	Parent = "\\\\WIN-MRGVKGGGRAN\\root\\virtualization\\v2:Msvm_ResourceAllocationSettingData.InstanceID=\"Microsoft:AD3CDDE5-1943-47A6-936F-6058C4BB3C85\\\\83F8638B-8DCA-4152-9EDA-2CA8B33039B4\\\\0\\\\1\\\\D\"";
+	PersistentReservationsSupported = FALSE;
+	PoolID = "";
+	Reservation = "1";
+	ResourceSubType = "Microsoft:Hyper-V:Virtual Hard Disk";
+	ResourceType = 31;
+	VirtualQuantity = "1";
+	VirtualQuantityUnits = "count";
+	VirtualResourceBlockSize = NULL;
+	Weight = 100;
+};
+
+*/
+
+
+    while (rasdEntry != NULL) {
+        resourceType = rasdEntry->data->ResourceType;
+                
+        if (resourceType == 
+            MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+            /* Get disk or CD/DVD drive backed by a file (VHD/ISO) */        
+            if (hypervParseDomainDefStorageExtent(domain, def, 
+                                                  rasdEntry,
+                                                  rasdEntryListStart,
+                                                  &scsiDriveIndex) < 0) {
+                goto cleanup;
+            }
+        } else if (resourceType == MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK) {
+            /* Get disk backed by a raw disk on the host */        
+            if (hypervParseDomainDefDisk(domain, def, rasdEntry, 
+                                         rasdEntryListStart,
+                                         &scsiDriveIndex) < 0) {
+                
+                goto cleanup;
+            }
+        }
+        
+        rasdEntry = rasdEntry->next;
+    }    
 
     /* Fill struct */
     def->virtType = VIR_DOMAIN_VIRT_HYPERV;
@@ -859,8 +973,9 @@ hypervDomainGetXMLDesc2012(virDomainPtr domain, unsigned int flags)
         notesArr[i] = *noteStrPtr++;
     }
     
-    if (VIR_STRDUP(def->description, virStringJoin(notesArr, notesDelim)) < 0)
+    if (VIR_STRDUP(def->description, virStringJoin(notesArr, notesDelim)) < 0) {
         goto cleanup;
+    }
 
     virDomainDefSetMemoryTotal(def, memorySettingData->data->Limit * 1024); /* megabyte to kilobyte */
     def->mem.cur_balloon = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */

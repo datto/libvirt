@@ -890,6 +890,7 @@ HYPERV_DRIVER_SOURCES =									\
 		hyperv/hyperv_private.h							\
 		hyperv/hyperv_driver.c hyperv/hyperv_driver.h				\
 		hyperv/hyperv_driver_2012.c hyperv/hyperv_driver_2012.h \
+		hyperv/hyperv_driver_shared.c hyperv/hyperv_driver_shared.h \
 		hyperv/hyperv_network_driver.c hyperv/hyperv_network_driver.h \
 		hyperv/hyperv_util.c hyperv/hyperv_util.h				\
 		hyperv/hyperv_wmi.c hyperv/hyperv_wmi.h					\
