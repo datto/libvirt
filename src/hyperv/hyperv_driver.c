@@ -2948,9 +2948,10 @@ hypervDomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     eprparam1.wmiProviderURI = ROOT_VIRTUALIZATION;
 
     /* Prepare EMBEDDED param 1 */
-    embeddedparam1.nbProps = 6;
+    embeddedparam1.nbProps = 9;
     if (VIR_ALLOC_N(tab_props, embeddedparam1.nbProps) < 0)
         goto cleanup;
+
     tab_props[0].name = "Parent";
     tab_props[0].val = ideRasdPath;
     tab_props[1].name = "Address";
@@ -2963,6 +2964,12 @@ hypervDomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     tab_props[4].val = sourceDiskPath;
     tab_props[5].name = "ConsumerVisibility";
     tab_props[5].val = "2";
+    tab_props[6].name = "AutomaticAllocation";
+    tab_props[6].val = "1";
+    tab_props[7].name = "AutomaticDeallocation";
+    tab_props[7].val = "1";
+    tab_props[8].name = "ElementName";
+    tab_props[8].val = "Hard Drive";
 
     embeddedparam1.instanceName =  MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
     embeddedparam1.prop_t = tab_props;
@@ -2971,12 +2978,12 @@ hypervDomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
     nb_params = 2;
     if (VIR_ALLOC_N(params, nb_params) < 0)
         goto cleanup;
-    (*params).name = "TargetSystem";
-    (*params).type = EPR_PARAM;
-    (*params).param = &eprparam1;
-    (*(params+1)).name = "ResourceSettingData";
-    (*(params+1)).type = EMBEDDED_PARAM;
-    (*(params+1)).param = &embeddedparam1;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam1;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam1;
 
     if (hypervInvokeMethod(priv, params, nb_params, "AddVirtualSystemResources",
                            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector) < 0) {
@@ -2988,15 +2995,11 @@ hypervDomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk)
 cleanup:
     VIR_FREE(ideRasdPath);
     VIR_FREE(tab_props);
-    //VIR_FREE(newDiskDrivePath);
     VIR_FREE(params);
     hypervFreeObject(priv, (hypervObject *)virtualSystemSettingData);
     hypervFreeObject(priv, (hypervObject *)resourceAllocationSettingData);
     hypervFreeObject(priv, (hypervObject *)resourceAllocationSettingData2);
-    //hypervFreeObject(priv, (hypervObject *)resourceAllocationSettingData3);
-    //hypervFreeObject(priv, (hypervObject *)resourceAllocationSettingData4);
     hypervFreeObject(priv, (hypervObject *)allocationCapabilities);
-    //hypervFreeObject(priv, (hypervObject *)allocationCapabilities2);
     hypervFreeObject(priv, (hypervObject *)sourceDiskDrive);
     virBufferFreeAndReset(&query);
 
