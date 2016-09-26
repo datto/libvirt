@@ -3807,6 +3807,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         hypervHypervisorDriver.connectGetCapabilities = hypervConnectGetCapabilities; /* 2008 & 2012 */
         hypervHypervisorDriver.connectGetHostname = hypervConnectGetHostname; /* 2008 & 2012 */
         hypervHypervisorDriver.connectGetType = hypervConnectGetType; /* 2008 & 2012 */
+        hypervHypervisorDriver.connectGetVersion = hypervConnectGetVersion; /* 2008 & 2012 */
         hypervHypervisorDriver.connectIsAlive = hypervConnectIsAlive; /* 2008 & 2012 */
         hypervHypervisorDriver.connectListAllDomains = hypervConnectListAllDomains2012;
         hypervHypervisorDriver.connectListDefinedDomains = hypervConnectListDefinedDomains2012;
