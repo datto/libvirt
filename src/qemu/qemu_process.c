@@ -1678,7 +1678,7 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
     }
 
     /* Hold an extra reference because we can't allow 'vm' to be
-     * deleted unitl the monitor gets its own reference. */
+     * deleted until the monitor gets its own reference. */
     virObjectRef(vm);
 
     ignore_value(virTimeMillisNow(&priv->monStart));
@@ -3248,6 +3248,7 @@ qemuProcessReconnect(void *opaque)
     int ret;
     unsigned int stopFlags = 0;
     bool jobStarted = false;
+    virCapsPtr caps = NULL;
 
     VIR_FREE(data);
 
@@ -3257,6 +3258,9 @@ qemuProcessReconnect(void *opaque)
 
     cfg = virQEMUDriverGetConfig(driver);
     priv = obj->privateData;
+
+    if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+        goto error;
 
     if (qemuDomainObjBeginJob(driver, obj, QEMU_JOB_MODIFY) < 0)
         goto error;
@@ -3327,7 +3331,8 @@ qemuProcessReconnect(void *opaque)
      * caps in the domain status, so re-query them
      */
     if (!priv->qemuCaps &&
-        !(priv->qemuCaps = virQEMUCapsCacheLookupCopy(driver->qemuCapsCache,
+        !(priv->qemuCaps = virQEMUCapsCacheLookupCopy(caps,
+                                                      driver->qemuCapsCache,
                                                       obj->def->emulator,
                                                       obj->def->os.machine)))
         goto error;
@@ -3427,6 +3432,7 @@ qemuProcessReconnect(void *opaque)
     virDomainObjEndAPI(&obj);
     virObjectUnref(conn);
     virObjectUnref(cfg);
+    virObjectUnref(caps);
     virNWFilterUnlockFilterUpdates();
     return;
 
@@ -3696,7 +3702,7 @@ qemuProcessVerifyGuestCPU(virQEMUDriverPtr driver,
         }
 
         if (def->features[VIR_DOMAIN_FEATURE_PVSPINLOCK] == VIR_TRISTATE_SWITCH_ON) {
-            if (!cpuHasFeature(guestcpu, VIR_CPU_x86_KVM_PV_UNHALT)) {
+            if (!virCPUDataCheckFeature(guestcpu, VIR_CPU_x86_KVM_PV_UNHALT)) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                                _("host doesn't support paravirtual spinlocks"));
                 goto cleanup;
@@ -3709,7 +3715,7 @@ qemuProcessVerifyGuestCPU(virQEMUDriverPtr driver,
                 if (virAsprintf(&cpuFeature, "__kvm_hv_%s",
                                 virDomainHypervTypeToString(i)) < 0)
                     goto cleanup;
-                if (!cpuHasFeature(guestcpu, cpuFeature)) {
+                if (!virCPUDataCheckFeature(guestcpu, cpuFeature)) {
                     switch ((virDomainHyperv) i) {
                     case VIR_DOMAIN_HYPERV_RELAXED:
                     case VIR_DOMAIN_HYPERV_VAPIC:
@@ -3745,7 +3751,7 @@ qemuProcessVerifyGuestCPU(virQEMUDriverPtr driver,
                     continue;
 
                 if (STREQ(feature->name, "invtsc") &&
-                    !cpuHasFeature(guestcpu, feature->name)) {
+                    !virCPUDataCheckFeature(guestcpu, feature->name)) {
                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                                    _("host doesn't support invariant TSC"));
                     goto cleanup;
@@ -4409,6 +4415,38 @@ qemuProcessStartWarnShmem(virDomainObjPtr vm)
     }
 }
 
+
+static int
+qemuProcessStartValidateGraphics(virDomainObjPtr vm)
+{
+    size_t i;
+
+    for (i = 0; i < vm->def->ngraphics; i++) {
+        virDomainGraphicsDefPtr graphics = vm->def->graphics[i];
+
+        switch (graphics->type) {
+        case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
+        case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
+            if (graphics->nListens > 1) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("QEMU does not support multiple listens for "
+                                 "one graphics device."));
+                return -1;
+            }
+            break;
+
+        case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
+        case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
+        case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
+        case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
+            break;
+        }
+    }
+
+    return 0;
+}
+
+
 static int
 qemuProcessStartValidateXML(virQEMUDriverPtr driver,
                             virDomainObjPtr vm,
@@ -4437,6 +4475,7 @@ qemuProcessStartValidateXML(virQEMUDriverPtr driver,
     return 0;
 }
 
+
 /**
  * qemuProcessStartValidate:
  * @vm: domain object
@@ -4456,8 +4495,6 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
                          virCapsPtr caps,
                          unsigned int flags)
 {
-    size_t i;
-
     if (!(flags & VIR_QEMU_PROCESS_START_PRETEND)) {
         if (vm->def->virtType == VIR_DOMAIN_VIRT_KVM) {
             VIR_DEBUG("Checking for KVM availability");
@@ -4484,29 +4521,7 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
 
     qemuProcessStartWarnShmem(vm);
 
-    for (i = 0; i < vm->def->ngraphics; i++) {
-        virDomainGraphicsDefPtr graphics = vm->def->graphics[i];
-
-        switch (graphics->type) {
-        case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
-        case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
-            if (graphics->nListens > 1) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("QEMU does not support multiple listens for "
-                                 "one graphics device."));
-                return -1;
-            }
-            break;
-
-        case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
-        case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
-        case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
-        case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
-            break;
-        }
-    }
-
-    return 0;
+    return qemuProcessStartValidateGraphics(vm);
 }
 
 
@@ -4551,7 +4566,8 @@ qemuProcessInit(virQEMUDriverPtr driver,
 
     VIR_DEBUG("Determining emulator version");
     virObjectUnref(priv->qemuCaps);
-    if (!(priv->qemuCaps = virQEMUCapsCacheLookupCopy(driver->qemuCapsCache,
+    if (!(priv->qemuCaps = virQEMUCapsCacheLookupCopy(caps,
+                                                      driver->qemuCapsCache,
                                                       vm->def->emulator,
                                                       vm->def->os.machine)))
         goto cleanup;
@@ -4772,7 +4788,7 @@ qemuProcessValidateHotpluggableVcpus(virDomainDefPtr def)
     virBitmapPtr ordermap = NULL;
     int ret = -1;
 
-    if (!(ordermap = virBitmapNew(maxvcpus)))
+    if (!(ordermap = virBitmapNew(maxvcpus + 1)))
         goto cleanup;
 
     /* validate:
@@ -4789,15 +4805,19 @@ qemuProcessValidateHotpluggableVcpus(virDomainDefPtr def)
             continue;
 
         if (vcpu->order != 0) {
-            if (virBitmapIsBitSet(ordermap, vcpu->order - 1)) {
+            if (virBitmapIsBitSet(ordermap, vcpu->order)) {
                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("duplicate vcpu order '%u'"), vcpu->order - 1);
+                               _("duplicate vcpu order '%u'"), vcpu->order);
                 goto cleanup;
             }
 
-            ignore_value(virBitmapSetBit(ordermap, vcpu->order - 1));
+            if (virBitmapSetBit(ordermap, vcpu->order)) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                               _("vcpu order '%u' exceeds vcpu count"),
+                               vcpu->order);
+                goto cleanup;
+            }
         }
-
 
         for (j = i + 1; j < (i + vcpupriv->vcpus); j++) {
             subvcpu = virDomainDefGetVcpu(def, j);
@@ -4932,6 +4952,76 @@ qemuProcessSetupHotpluggableVcpus(virQEMUDriverPtr driver,
 }
 
 
+static int
+qemuProcessUpdateGuestCPU(virDomainDefPtr def,
+                          virQEMUCapsPtr qemuCaps,
+                          virCapsPtr caps,
+                          unsigned int flags)
+{
+    int ret = -1;
+    size_t nmodels = 0;
+    char **models = NULL;
+
+    if (!def->cpu)
+        return 0;
+
+    /* nothing to do if only topology part of CPU def is used */
+    if (def->cpu->mode == VIR_CPU_MODE_CUSTOM && !def->cpu->model)
+        return 0;
+
+    /* Old libvirt added host CPU model to host-model CPUs for migrations,
+     * while new libvirt just turns host-model into custom mode. We need
+     * to fix the mode to maintain backward compatibility and to avoid
+     * the CPU model to be replaced in virCPUUpdate.
+     */
+    if (!(flags & VIR_QEMU_PROCESS_START_NEW) &&
+        ARCH_IS_X86(def->os.arch) &&
+        def->cpu->mode == VIR_CPU_MODE_HOST_MODEL &&
+        def->cpu->model) {
+        def->cpu->mode = VIR_CPU_MODE_CUSTOM;
+    }
+
+    if (!virQEMUCapsIsCPUModeSupported(qemuCaps, caps, def->virtType,
+                                       def->cpu->mode)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("CPU mode '%s' for %s %s domain on %s host is not "
+                         "supported by hypervisor"),
+                       virCPUModeTypeToString(def->cpu->mode),
+                       virArchToString(def->os.arch),
+                       virDomainVirtTypeToString(def->virtType),
+                       virArchToString(caps->host.arch));
+        return -1;
+    }
+
+    /* nothing to update for host-passthrough */
+    if (def->cpu->mode == VIR_CPU_MODE_HOST_PASSTHROUGH)
+        return 0;
+
+    /* custom CPUs in TCG mode don't need to be compared to host CPU */
+    if (def->virtType != VIR_DOMAIN_VIRT_QEMU ||
+        def->cpu->mode != VIR_CPU_MODE_CUSTOM) {
+        if (virCPUCompare(caps->host.arch, virQEMUCapsGetHostModel(qemuCaps),
+                          def->cpu, true) < 0)
+            return -1;
+    }
+
+    if (virCPUUpdate(def->os.arch, def->cpu,
+                     virQEMUCapsGetHostModel(qemuCaps)) < 0)
+        goto cleanup;
+
+    if (virQEMUCapsGetCPUDefinitions(qemuCaps, &models, &nmodels) < 0 ||
+        virCPUTranslate(def->os.arch, def->cpu, models, nmodels) < 0)
+        goto cleanup;
+
+    def->cpu->fallback = VIR_CPU_FALLBACK_FORBID;
+    ret = 0;
+
+ cleanup:
+    virStringFreeListCount(models, nmodels);
+    return ret;
+}
+
+
 /**
  * qemuProcessPrepareDomain
  *
@@ -5041,6 +5131,10 @@ qemuProcessPrepareDomain(virConnectPtr conn,
     priv->monError = false;
     priv->monStart = 0;
     priv->gotShutdown = false;
+
+    VIR_DEBUG("Updating guest CPU definition");
+    if (qemuProcessUpdateGuestCPU(vm->def, priv->qemuCaps, caps, flags) < 0)
+        goto cleanup;
 
     ret = 0;
  cleanup:
@@ -5810,7 +5904,9 @@ void qemuProcessStop(virQEMUDriverPtr driver,
     virDomainObjBroadcast(vm);
 
     if ((timestamp = virTimeStringNow()) != NULL) {
-        qemuDomainLogAppendMessage(driver, vm, "%s: shutting down\n", timestamp);
+        qemuDomainLogAppendMessage(driver, vm, "%s: shutting down, reason=%s\n",
+                                   timestamp,
+                                   virDomainShutoffReasonTypeToString(reason));
         VIR_FREE(timestamp);
     }
 
@@ -6167,7 +6263,8 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
 
     VIR_DEBUG("Determining emulator version");
     virObjectUnref(priv->qemuCaps);
-    if (!(priv->qemuCaps = virQEMUCapsCacheLookupCopy(driver->qemuCapsCache,
+    if (!(priv->qemuCaps = virQEMUCapsCacheLookupCopy(caps,
+                                                      driver->qemuCapsCache,
                                                       vm->def->emulator,
                                                       vm->def->os.machine)))
         goto error;
@@ -6289,6 +6386,9 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
     if (active && virAtomicIntDecAndTest(&driver->nactive) &&
         driver->inhibitCallback)
         driver->inhibitCallback(false, driver->inhibitOpaque);
+
+    qemuMonitorClose(priv->mon);
+    priv->mon = NULL;
     qemuDomainLogContextFree(logCtxt);
     VIR_FREE(seclabel);
     VIR_FREE(sec_managers);

@@ -49,7 +49,8 @@ xenapiDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                                const virDomainDef *def,
                                virCapsPtr caps ATTRIBUTE_UNUSED,
                                unsigned int parseFlags ATTRIBUTE_UNUSED,
-                               void *opaque ATTRIBUTE_UNUSED)
+                               void *opaque ATTRIBUTE_UNUSED,
+                               void *parseOpaque ATTRIBUTE_UNUSED)
 {
     if (dev->type == VIR_DOMAIN_DEVICE_CHR &&
         dev->data.chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
@@ -75,7 +76,8 @@ static int
 xenapiDomainDefPostParse(virDomainDefPtr def,
                          virCapsPtr caps ATTRIBUTE_UNUSED,
                          unsigned int parseFlags ATTRIBUTE_UNUSED,
-                         void *opaque ATTRIBUTE_UNUSED)
+                         void *opaque ATTRIBUTE_UNUSED,
+                         void *parseOpaque ATTRIBUTE_UNUSED)
 {
     /* add implicit input device */
     if (xenDomainDefAddImplicitInputDevice(def) < 0)
@@ -567,6 +569,7 @@ xenapiDomainCreateXML(virConnectPtr conn,
 
     virDomainDefPtr defPtr = virDomainDefParseString(xmlDesc,
                                                      priv->caps, priv->xmlopt,
+                                                     NULL,
                                                      parse_flags);
     if (!defPtr)
         return NULL;
@@ -1751,6 +1754,7 @@ xenapiDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
         return NULL;
     virDomainDefPtr defPtr = virDomainDefParseString(xml,
                                                      priv->caps, priv->xmlopt,
+                                                     NULL,
                                                      parse_flags);
     if (!defPtr)
         return NULL;

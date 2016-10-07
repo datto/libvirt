@@ -78,7 +78,7 @@ esxFreePrivate(esxPrivate **priv)
 
 /*
  * Parse a file name from a .vmx file and convert it to datastore path format
- * if possbile. A .vmx file can contain file names in various formats:
+ * if possible. A .vmx file can contain file names in various formats:
  *
  * - A single name referencing a file in the same directory as the .vmx file:
  *
@@ -969,7 +969,7 @@ esxConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
                     STRNEQ(vCenterIPAddress, potentialVCenterIPAddress)) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    _("This host is managed by a vCenter with IP "
-                                     "address %s, but a mismachting vCenter '%s' "
+                                     "address %s, but a mismatching vCenter '%s' "
                                      "(%s) has been specified"),
                                    potentialVCenterIPAddress, priv->parsedUri->vCenter,
                                    vCenterIPAddress);
@@ -2831,7 +2831,7 @@ esxConnectDomainXMLToNative(virConnectPtr conn, const char *nativeFormat,
         return NULL;
 
     def = virDomainDefParseString(domainXml, priv->caps, priv->xmlopt,
-                                  VIR_DOMAIN_DEF_PARSE_INACTIVE);
+                                  NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE);
 
     if (!def)
         return NULL;
@@ -3046,7 +3046,7 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
 
     /* Parse domain XML */
     def = virDomainDefParseString(xml, priv->caps, priv->xmlopt,
-                                  parse_flags);
+                                  NULL, parse_flags);
 
     if (!def)
         return NULL;

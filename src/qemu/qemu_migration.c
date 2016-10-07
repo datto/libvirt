@@ -1311,7 +1311,7 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
             goto error;
         }
         mig->persistent = virDomainDefParseNode(doc, nodes[0],
-                                                caps, driver->xmlopt,
+                                                caps, driver->xmlopt, NULL,
                                                 VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                 VIR_DOMAIN_DEF_PARSE_ABI_UPDATE |
                                                 VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
@@ -2903,6 +2903,15 @@ qemuDomainMigrateGraphicsRelocate(virQEMUDriverPtr driver,
         goto cleanup;
     }
 
+    /* Older libvirt sends port == 0 for listen type='none' graphics. It's
+     * safe to ignore such requests since relocation to unknown port does
+     * not make sense in general.
+     */
+    if (port <= 0 && tlsPort <= 0) {
+        ret = 0;
+        goto cleanup;
+    }
+
     if (qemuDomainObjEnterMonitorAsync(driver, vm,
                                        QEMU_ASYNC_JOB_MIGRATION_OUT) == 0) {
         ret = qemuMonitorGraphicsRelocate(priv->mon, type, listenAddress,
@@ -3233,7 +3242,7 @@ qemuMigrationBeginPhase(virQEMUDriverPtr driver,
     }
 
     if (xmlin) {
-        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt,
+        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt, priv->qemuCaps,
                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                             VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
             goto cleanup;
@@ -3655,7 +3664,7 @@ qemuMigrationPrepareAny(virQEMUDriverPtr driver,
                 virDomainDefPtr newdef;
 
                 VIR_DEBUG("Using hook-filtered domain XML: %s", xmlout);
-                newdef = virDomainDefParseString(xmlout, caps, driver->xmlopt,
+                newdef = virDomainDefParseString(xmlout, caps, driver->xmlopt, NULL,
                                                  VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                  VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
                 if (!newdef)
@@ -4135,7 +4144,7 @@ qemuMigrationPrepareDef(virQEMUDriverPtr driver,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         return NULL;
 
-    if (!(def = virDomainDefParseString(dom_xml, caps, driver->xmlopt,
+    if (!(def = virDomainDefParseString(dom_xml, caps, driver->xmlopt, NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto cleanup;

@@ -694,6 +694,7 @@ virTestCompareToFile(const char *strcontent,
     int ret = -1;
     char *filecontent = NULL;
     char *fixedcontent = NULL;
+    const char *cmpcontent = strcontent;
 
     if (virTestLoadFile(filename, &filecontent) < 0 && !virTestGetRegenerate())
         goto failure;
@@ -703,13 +704,13 @@ virTestCompareToFile(const char *strcontent,
         strcontent[strlen(strcontent) - 1] != '\n') {
         if (virAsprintf(&fixedcontent, "%s\n", strcontent) < 0)
             goto failure;
+        cmpcontent = fixedcontent;
     }
 
-    if (STRNEQ_NULLABLE(fixedcontent ? fixedcontent : strcontent,
-                        filecontent)) {
+    if (STRNEQ_NULLABLE(cmpcontent, filecontent)) {
         virTestDifferenceFull(stderr,
                               filecontent, filename,
-                              strcontent, NULL);
+                              cmpcontent, NULL);
         goto failure;
     }
 
@@ -1126,7 +1127,7 @@ testCompareDomXML2XMLFiles(virCapsPtr caps, virDomainXMLOptionPtr xmlopt,
     if (!live)
         format_flags |= VIR_DOMAIN_DEF_FORMAT_INACTIVE;
 
-    if (!(def = virDomainDefParseFile(infile, caps, xmlopt, parse_flags))) {
+    if (!(def = virDomainDefParseFile(infile, caps, xmlopt, NULL, parse_flags))) {
         result = TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE;
         goto out;
     }

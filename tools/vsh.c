@@ -328,6 +328,18 @@ static int
 vshCmddefCheckInternals(const vshCmdDef *cmd)
 {
     size_t i;
+    const char *help = NULL;
+
+    /* in order to perform the validation resolve the alias first */
+    if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
+        if (!cmd->alias)
+            return -1;
+        cmd = vshCmddefSearch(cmd->alias);
+    }
+
+    /* Each command has to provide a non-empty help string. */
+    if (!(help = vshCmddefGetInfo(cmd, "help")) || !*help)
+        return -1;
 
     if (!cmd->opts)
         return 0;
@@ -373,10 +385,15 @@ vshCmddefCheckInternals(const vshCmdDef *cmd)
     return 0;
 }
 
-/* Keeps track of options that are required or need and argument */
+/* Parse the options associated with @cmd, i.e. test whether options are
+ * required or need an argument.
+ *
+ * Returns -1 on error or 0 on success, filling the caller-provided bitmaps
+ * which keep track of required options and options needing an argument.
+ */
 static int
-vshCmddefOptFill(const vshCmdDef *cmd, uint64_t *opts_need_arg,
-                 uint64_t *opts_required)
+vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
+                  uint64_t *opts_required)
 {
     size_t i;
     bool optional = false;
@@ -415,19 +432,6 @@ vshCmddefOptFill(const vshCmdDef *cmd, uint64_t *opts_need_arg,
             optional = true;
         }
     }
-    return 0;
-}
-
-/* Validate that the options associated with cmd can be parsed.  */
-static int
-vshCmddefOptParse(const vshCmdDef *cmd, uint64_t *opts_need_arg,
-                  uint64_t *opts_required)
-{
-    if (vshCmddefCheckInternals(cmd) < 0)
-        return -1;
-
-    if (vshCmddefOptFill(cmd, opts_need_arg, opts_required) < 0)
-        return -1;
 
     return 0;
 }
@@ -624,131 +628,131 @@ bool
 vshCmddefHelp(vshControl *ctl, const char *cmdname)
 {
     const vshCmdDef *def = vshCmddefSearch(cmdname);
+    const char *desc = NULL;
+    char buf[256];
+    uint64_t opts_need_arg;
+    uint64_t opts_required;
+    bool shortopt = false; /* true if 'arg' works instead of '--opt arg' */
 
     if (!def) {
         vshError(ctl, _("command '%s' doesn't exist"), cmdname);
         return false;
-    } else {
-        /* Don't translate desc if it is "".  */
-        const char *desc = vshCmddefGetInfo(def, "desc");
-        const char *help = _(vshCmddefGetInfo(def, "help"));
-        char buf[256];
-        uint64_t opts_need_arg;
-        uint64_t opts_required;
-        bool shortopt = false; /* true if 'arg' works instead of '--opt arg' */
-
-        if (vshCmddefOptParse(def, &opts_need_arg, &opts_required)) {
-            vshError(ctl, _("internal error: bad options in command: '%s'"),
-                     def->name);
-            return false;
-        }
-
-        fputs(_("  NAME\n"), stdout);
-        fprintf(stdout, "    %s - %s\n", def->name, help);
-
-        fputs(_("\n  SYNOPSIS\n"), stdout);
-        fprintf(stdout, "    %s", def->name);
-        if (def->opts) {
-            const vshCmdOptDef *opt;
-            for (opt = def->opts; opt->name; opt++) {
-                const char *fmt = "%s";
-                switch (opt->type) {
-                case VSH_OT_BOOL:
-                    fmt = "[--%s]";
-                    break;
-                case VSH_OT_INT:
-                    /* xgettext:c-format */
-                    fmt = ((opt->flags & VSH_OFLAG_REQ) ? "<%s>"
-                           : _("[--%s <number>]"));
-                    if (!(opt->flags & VSH_OFLAG_REQ_OPT))
-                        shortopt = true;
-                    break;
-                case VSH_OT_STRING:
-                    /* xgettext:c-format */
-                    fmt = _("[--%s <string>]");
-                    if (!(opt->flags & VSH_OFLAG_REQ_OPT))
-                        shortopt = true;
-                    break;
-                case VSH_OT_DATA:
-                    fmt = ((opt->flags & VSH_OFLAG_REQ) ? "<%s>" : "[<%s>]");
-                    if (!(opt->flags & VSH_OFLAG_REQ_OPT))
-                        shortopt = true;
-                    break;
-                case VSH_OT_ARGV:
-                    /* xgettext:c-format */
-                    if (shortopt) {
-                        fmt = (opt->flags & VSH_OFLAG_REQ)
-                            ? _("{[--%s] <string>}...")
-                            : _("[[--%s] <string>]...");
-                    } else {
-                        fmt = (opt->flags & VSH_OFLAG_REQ) ? _("<%s>...")
-                            : _("[<%s>]...");
-                    }
-                    break;
-                case VSH_OT_ALIAS:
-                    /* aliases are intentionally undocumented */
-                    continue;
-                }
-                fputc(' ', stdout);
-                fprintf(stdout, fmt, opt->name);
-            }
-        }
-        fputc('\n', stdout);
-
-        if (desc[0]) {
-            /* Print the description only if it's not empty.  */
-            fputs(_("\n  DESCRIPTION\n"), stdout);
-            fprintf(stdout, "    %s\n", _(desc));
-        }
-
-        if (def->opts && def->opts->name) {
-            const vshCmdOptDef *opt;
-            fputs(_("\n  OPTIONS\n"), stdout);
-            for (opt = def->opts; opt->name; opt++) {
-                switch (opt->type) {
-                case VSH_OT_BOOL:
-                    snprintf(buf, sizeof(buf), "--%s", opt->name);
-                    break;
-                case VSH_OT_INT:
-                    snprintf(buf, sizeof(buf),
-                             (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
-                             : _("--%s <number>"), opt->name);
-                    break;
-                case VSH_OT_STRING:
-                    /* OT_STRING should never be VSH_OFLAG_REQ */
-                    if (opt->flags & VSH_OFLAG_REQ) {
-                        vshError(ctl,
-                                 _("internal error: bad options in command: '%s'"),
-                                 def->name);
-                        return false;
-                    }
-                    snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
-                    break;
-                case VSH_OT_DATA:
-                    /* OT_DATA should always be VSH_OFLAG_REQ */
-                    if (!(opt->flags & VSH_OFLAG_REQ)) {
-                        vshError(ctl,
-                                 _("internal error: bad options in command: '%s'"),
-                                 def->name);
-                        return false;
-                    }
-                    snprintf(buf, sizeof(buf), _("[--%s] <string>"),
-                             opt->name);
-                    break;
-                case VSH_OT_ARGV:
-                    snprintf(buf, sizeof(buf),
-                             shortopt ? _("[--%s] <string>") : _("<%s>"),
-                             opt->name);
-                    break;
-                case VSH_OT_ALIAS:
-                    continue;
-                }
-
-                fprintf(stdout, "    %-15s  %s\n", buf, _(opt->help));
-            }
-        }
-        fputc('\n', stdout);
     }
+
+    if (vshCmddefOptParse(def, &opts_need_arg, &opts_required)) {
+        vshError(ctl, _("internal error: bad options in command: '%s'"),
+                 def->name);
+        return false;
+    }
+
+    fputs(_("  NAME\n"), stdout);
+    fprintf(stdout, "    %s - %s\n", def->name,
+            _(vshCmddefGetInfo(def, "help")));
+
+    fputs(_("\n  SYNOPSIS\n"), stdout);
+    fprintf(stdout, "    %s", def->name);
+    if (def->opts) {
+        const vshCmdOptDef *opt;
+        for (opt = def->opts; opt->name; opt++) {
+            const char *fmt = "%s";
+            switch (opt->type) {
+            case VSH_OT_BOOL:
+                fmt = "[--%s]";
+                break;
+            case VSH_OT_INT:
+                /* xgettext:c-format */
+                fmt = ((opt->flags & VSH_OFLAG_REQ) ? "<%s>"
+                       : _("[--%s <number>]"));
+                if (!(opt->flags & VSH_OFLAG_REQ_OPT))
+                    shortopt = true;
+                break;
+            case VSH_OT_STRING:
+                /* xgettext:c-format */
+                fmt = _("[--%s <string>]");
+                if (!(opt->flags & VSH_OFLAG_REQ_OPT))
+                    shortopt = true;
+                break;
+            case VSH_OT_DATA:
+                fmt = ((opt->flags & VSH_OFLAG_REQ) ? "<%s>" : "[<%s>]");
+                if (!(opt->flags & VSH_OFLAG_REQ_OPT))
+                    shortopt = true;
+                break;
+            case VSH_OT_ARGV:
+                /* xgettext:c-format */
+                if (shortopt) {
+                    fmt = (opt->flags & VSH_OFLAG_REQ)
+                        ? _("{[--%s] <string>}...")
+                        : _("[[--%s] <string>]...");
+                } else {
+                    fmt = (opt->flags & VSH_OFLAG_REQ) ? _("<%s>...")
+                        : _("[<%s>]...");
+                }
+                break;
+            case VSH_OT_ALIAS:
+                /* aliases are intentionally undocumented */
+                continue;
+            }
+            fputc(' ', stdout);
+            fprintf(stdout, fmt, opt->name);
+        }
+    }
+    fputc('\n', stdout);
+
+    desc = vshCmddefGetInfo(def, "desc");
+    if (*desc) {
+        /* Print the description only if it's not empty.  */
+        fputs(_("\n  DESCRIPTION\n"), stdout);
+        fprintf(stdout, "    %s\n", _(desc));
+    }
+
+    if (def->opts && def->opts->name) {
+        const vshCmdOptDef *opt;
+        fputs(_("\n  OPTIONS\n"), stdout);
+        for (opt = def->opts; opt->name; opt++) {
+            switch (opt->type) {
+            case VSH_OT_BOOL:
+                snprintf(buf, sizeof(buf), "--%s", opt->name);
+                break;
+            case VSH_OT_INT:
+                snprintf(buf, sizeof(buf),
+                         (opt->flags & VSH_OFLAG_REQ) ? _("[--%s] <number>")
+                         : _("--%s <number>"), opt->name);
+                break;
+            case VSH_OT_STRING:
+                /* OT_STRING should never be VSH_OFLAG_REQ */
+                if (opt->flags & VSH_OFLAG_REQ) {
+                    vshError(ctl,
+                             _("internal error: bad options in command: '%s'"),
+                             def->name);
+                    return false;
+                }
+                snprintf(buf, sizeof(buf), _("--%s <string>"), opt->name);
+                break;
+            case VSH_OT_DATA:
+                /* OT_DATA should always be VSH_OFLAG_REQ */
+                if (!(opt->flags & VSH_OFLAG_REQ)) {
+                    vshError(ctl,
+                             _("internal error: bad options in command: '%s'"),
+                             def->name);
+                    return false;
+                }
+                snprintf(buf, sizeof(buf), _("[--%s] <string>"),
+                         opt->name);
+                break;
+            case VSH_OT_ARGV:
+                snprintf(buf, sizeof(buf),
+                         shortopt ? _("[--%s] <string>") : _("<%s>"),
+                         opt->name);
+                break;
+            case VSH_OT_ALIAS:
+                continue;
+            }
+
+            fprintf(stdout, "    %-15s  %s\n", buf, _(opt->help));
+        }
+    }
+    fputc('\n', stdout);
+
     return true;
 }
 
@@ -1409,6 +1413,13 @@ vshCommandParse(vshControl *ctl, vshCommandParser *parser)
                 if (!(cmd = vshCmddefSearch(tkdata))) {
                     vshError(ctl, _("unknown command: '%s'"), tkdata);
                     goto syntaxError;   /* ... or ignore this command only? */
+                }
+
+                /* aliases need to be resolved to the actual commands */
+                if (cmd->flags & VSH_CMD_FLAG_ALIAS) {
+                    VIR_FREE(tkdata);
+                    tkdata = vshStrdup(ctl, cmd->alias);
+                    cmd = vshCmddefSearch(tkdata);
                 }
                 if (vshCmddefOptParse(cmd, &opts_need_arg,
                                       &opts_required) < 0) {
@@ -2571,7 +2582,8 @@ vshReadlineCommandGenerator(const char *text, int state)
 
         if (cmds[cmd_list_index].name) {
             while ((name = cmds[cmd_list_index].name)) {
-                cmd_list_index++;
+                if (cmds[cmd_list_index++].flags & VSH_CMD_FLAG_ALIAS)
+                    continue;
 
                 if (STREQLEN(name, text, len))
                     return vshStrdup(NULL, name);
@@ -2607,7 +2619,6 @@ vshReadlineOptionsGenerator(const char *text, int state, const vshCmdDef *cmd_pa
         return NULL;
 
     while ((name = cmd->opts[list_index].name)) {
-        const vshCmdOptDef *opt = &cmd->opts[list_index];
         char *res;
 
         list_index++;
@@ -2636,7 +2647,7 @@ vshReadlineParse(const char *text, int state)
     static vshCommandParser parser, sanitizer;
     vshCommandToken tk;
     static const vshCmdDef *cmd;
-    const vshCmdOptDef *opt;
+    const vshCmdOptDef *opt = NULL;
     char *tkdata, *optstr, *const_tkdata, *completed_name;
     char *res = NULL;
     static char *ctext, *sanitized_text;
@@ -2709,10 +2720,12 @@ vshReadlineParse(const char *text, int state)
             if (!cmd) {
                 if (!(cmd = vshCmddefSearch(tkdata)))
                     goto error;
-                cmd_exists = true;
+                if (cmd->flags & VSH_CMD_FLAG_ALIAS)
+                    cmd = vshCmddefSearch(cmd->alias);
 
-                if (vshCmddefOptFill(cmd, &const_opts_need_arg,
-                                     &const_opts_required) < 0)
+                cmd_exists = true;
+                if (vshCmddefOptParse(cmd, &const_opts_need_arg,
+                                      &const_opts_required) < 0)
                     goto error;
                 opts_need_arg = const_opts_need_arg;
                 opts_seen = const_opts_seen;
@@ -3079,8 +3092,9 @@ vshInitReload(vshControl *ctl)
 void
 vshDeinit(vshControl *ctl)
 {
-    if (ctl->imode)
-        vshReadlineDeinit(ctl);
+    /* NB: Don't make calling of vshReadlineDeinit conditional on active
+     * interactive mode. */
+    vshReadlineDeinit(ctl);
     vshCloseLogFile(ctl);
 }
 
@@ -3326,5 +3340,38 @@ bool
 cmdQuit(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
 {
     ctl->imode = false;
+    return true;
+}
+
+/* -----------------
+ * Command self-test
+ * ----------------- */
+
+const vshCmdInfo info_selftest[] = {
+    {.name = "help",
+     .data = N_("internal command for testing virt shells")
+    },
+    {.name = "desc",
+     .data = N_("internal use only")
+    },
+    {.name = NULL}
+};
+
+/* Prints help for every command.
+ * That runs vshCmddefOptParse which validates
+ * the per-command options structure. */
+bool
+cmdSelfTest(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+{
+    const vshCmdGrp *grp;
+    const vshCmdDef *def;
+
+    for (grp = cmdGroups; grp->name; grp++) {
+        for (def = grp->commands; def->name; def++) {
+            if (vshCmddefCheckInternals(def) < 0)
+                return false;
+        }
+    }
+
     return true;
 }

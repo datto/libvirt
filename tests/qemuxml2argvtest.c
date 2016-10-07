@@ -27,6 +27,10 @@
 # include "storage/storage_driver.h"
 # include "virmock.h"
 
+# define __QEMU_CAPSRIV_H_ALLOW__
+# include "qemu/qemu_capspriv.h"
+# undef __QEMU_CAPSRIV_H_ALLOW__
+
 # include "testutilsqemu.h"
 
 # define VIR_FROM_THIS VIR_FROM_QEMU
@@ -265,14 +269,118 @@ typedef enum {
     FLAG_FIPS               = 1 << 3,
 } virQemuXML2ArgvTestFlags;
 
-static int testCompareXMLToArgvFiles(const char *xml,
-                                     const char *cmdline,
-                                     virQEMUCapsPtr extraFlags,
-                                     const char *migrateURI,
-                                     virQemuXML2ArgvTestFlags flags,
-                                     unsigned int parseFlags)
+struct testInfo {
+    const char *name;
+    virQEMUCapsPtr qemuCaps;
+    const char *migrateFrom;
+    int migrateFd;
+    unsigned int flags;
+    unsigned int parseFlags;
+    bool skipLegacyCPUs;
+};
+
+
+static int
+testAddCPUModels(virQEMUCapsPtr caps, bool skipLegacy)
 {
+    virArch arch = virQEMUCapsGetArch(caps);
+    const char *x86Models[] = {
+        "Opteron_G3", "Opteron_G2", "Opteron_G1",
+        "Nehalem", "Penryn", "Conroe",
+        "Haswell-noTSX", "Haswell",
+    };
+    const char *x86LegacyModels[] = {
+        "n270", "athlon", "pentium3", "pentium2", "pentium",
+        "486", "coreduo", "kvm32", "qemu32", "kvm64",
+        "core2duo", "phenom", "qemu64",
+    };
+    const char *armModels[] = {
+        "cortex-a9", "cortex-a8", "cortex-a57", "cortex-a53",
+    };
+    const char *ppc64Models[] = {
+        "POWER8", "POWER7",
+    };
+
+    if (ARCH_IS_X86(arch)) {
+        if (virQEMUCapsAddCPUDefinitions(caps, x86Models,
+                                         ARRAY_CARDINALITY(x86Models)) < 0)
+            return -1;
+
+        if (!skipLegacy &&
+            virQEMUCapsAddCPUDefinitions(caps, x86LegacyModels,
+                                         ARRAY_CARDINALITY(x86LegacyModels)) < 0)
+            return -1;
+    } else if (ARCH_IS_ARM(arch)) {
+        if (virQEMUCapsAddCPUDefinitions(caps, armModels,
+                                         ARRAY_CARDINALITY(armModels)) < 0)
+            return -1;
+    } else if (ARCH_IS_PPC64(arch)) {
+        if (virQEMUCapsAddCPUDefinitions(caps, ppc64Models,
+                                         ARRAY_CARDINALITY(ppc64Models)) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+
+static int
+testInitQEMUCaps(struct testInfo *info,
+                 int gic)
+{
+    int ret = -1;
+
+    if (!(info->qemuCaps = virQEMUCapsNew()))
+        goto cleanup;
+
+    virQEMUCapsSet(info->qemuCaps, QEMU_CAPS_NO_ACPI);
+
+    if (testQemuCapsSetGIC(info->qemuCaps, gic) < 0)
+        goto cleanup;
+
+    ret = 0;
+
+ cleanup:
+    return ret;
+}
+
+
+static int
+testUpdateQEMUCaps(const struct testInfo *info,
+                   virDomainObjPtr vm,
+                   virCapsPtr caps)
+{
+    int ret = -1;
+
+    virQEMUCapsSetArch(info->qemuCaps, vm->def->os.arch);
+
+    if (testAddCPUModels(info->qemuCaps, info->skipLegacyCPUs) < 0)
+        goto cleanup;
+
+    virQEMUCapsInitHostCPUModel(info->qemuCaps, caps);
+
+    virQEMUCapsFilterByMachineType(info->qemuCaps, vm->def->os.machine);
+
+    if (ARCH_IS_X86(vm->def->os.arch))
+        virQEMUCapsSet(info->qemuCaps, QEMU_CAPS_PCI_MULTIBUS);
+
+    ret = 0;
+
+ cleanup:
+    return ret;
+}
+
+
+static int
+testCompareXMLToArgv(const void *data)
+{
+    const struct testInfo *info = data;
+    char *xml = NULL;
+    char *args = NULL;
+    char *migrateURI = NULL;
     char *actualargv = NULL;
+    unsigned int flags = info->flags;
+    unsigned int parseFlags = info->parseFlags;
     int ret = -1;
     virDomainObjPtr vm = NULL;
     virDomainChrSourceDef monitor_chr;
@@ -285,56 +393,70 @@ static int testCompareXMLToArgvFiles(const char *xml,
     memset(&monitor_chr, 0, sizeof(monitor_chr));
 
     if (!(conn = virGetConnect()))
-        goto out;
+        goto cleanup;
+
     conn->secretDriver = &fakeSecretDriver;
     conn->storageDriver = &fakeStorageDriver;
 
-    if (!(vm = virDomainObjNew(driver.xmlopt)))
-        goto out;
+    if (virQEMUCapsGet(info->qemuCaps, QEMU_CAPS_MONITOR_JSON))
+        flags |= FLAG_JSON;
 
+    if (virQEMUCapsGet(info->qemuCaps, QEMU_CAPS_ENABLE_FIPS))
+        flags |= FLAG_FIPS;
+
+    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, info->name,
+                                info->qemuCaps) < 0)
+        goto cleanup;
+
+    if (virAsprintf(&xml, "%s/qemuxml2argvdata/qemuxml2argv-%s.xml",
+                    abs_srcdir, info->name) < 0 ||
+        virAsprintf(&args, "%s/qemuxml2argvdata/qemuxml2argv-%s.args",
+                    abs_srcdir, info->name) < 0)
+        goto cleanup;
+
+    if (info->migrateFrom &&
+        !(migrateURI = qemuMigrationIncomingURI(info->migrateFrom,
+                                                info->migrateFd)))
+        goto cleanup;
+
+    if (!(vm = virDomainObjNew(driver.xmlopt)))
+        goto cleanup;
+
+    parseFlags |= VIR_DOMAIN_DEF_PARSE_INACTIVE;
     if (!(vm->def = virDomainDefParseFile(xml, driver.caps, driver.xmlopt,
-                                          (VIR_DOMAIN_DEF_PARSE_INACTIVE |
-                                           parseFlags)))) {
+                                          NULL, parseFlags))) {
         if (flags & FLAG_EXPECT_PARSE_ERROR)
             goto ok;
-        goto out;
+        goto cleanup;
     }
     priv = vm->privateData;
 
     if (virBitmapParse("0-3", &priv->autoNodeset, 4) < 0)
-        goto out;
+        goto cleanup;
 
     if (!virDomainDefCheckABIStability(vm->def, vm->def)) {
         VIR_TEST_DEBUG("ABI stability check failed on %s", xml);
-        goto out;
+        goto cleanup;
     }
 
     vm->def->id = -1;
 
     if (qemuProcessPrepareMonitorChr(&monitor_chr, priv->libDir) < 0)
-        goto out;
-
-    virQEMUCapsSetList(extraFlags,
-                       QEMU_CAPS_NO_ACPI,
-                       QEMU_CAPS_LAST);
+        goto cleanup;
 
     if (STREQ(vm->def->os.machine, "pc") &&
         STREQ(vm->def->emulator, "/usr/bin/qemu-system-x86_64")) {
         VIR_FREE(vm->def->os.machine);
         if (VIR_STRDUP(vm->def->os.machine, "pc-0.11") < 0)
-            goto out;
+            goto cleanup;
     }
 
-    virQEMUCapsFilterByMachineType(extraFlags, vm->def->os.machine);
+    if (testUpdateQEMUCaps(info, vm, driver.caps) < 0)
+        goto cleanup;
 
     log = virTestLogContentAndReset();
     VIR_FREE(log);
     virResetLastError();
-
-    if (vm->def->os.arch == VIR_ARCH_X86_64 ||
-        vm->def->os.arch == VIR_ARCH_I686) {
-        virQEMUCapsSet(extraFlags, QEMU_CAPS_PCI_MULTIBUS);
-    }
 
     for (i = 0; i < vm->def->nhostdevs; i++) {
         virDomainHostdevDefPtr hostdev = vm->def->hostdevs[i];
@@ -351,14 +473,14 @@ static int testCompareXMLToArgvFiles(const char *xml,
                                             VIR_QEMU_PROCESS_START_COLD))) {
         if (flags & FLAG_EXPECT_FAILURE)
             goto ok;
-        goto out;
+        goto cleanup;
     }
 
     if (!(actualargv = virCommandToString(cmd)))
-        goto out;
+        goto cleanup;
 
-    if (virTestCompareToFile(actualargv, cmdline) < 0)
-        goto out;
+    if (virTestCompareToFile(actualargv, args) < 0)
+        goto cleanup;
 
     ret = 0;
 
@@ -366,7 +488,7 @@ static int testCompareXMLToArgvFiles(const char *xml,
     if (ret == 0 && flags & FLAG_EXPECT_FAILURE) {
         ret = -1;
         VIR_TEST_DEBUG("Error expected but there wasn't any.\n");
-        goto out;
+        goto cleanup;
     }
     if (!virTestOOMActive()) {
         if (flags & FLAG_EXPECT_FAILURE) {
@@ -377,118 +499,19 @@ static int testCompareXMLToArgvFiles(const char *xml,
         ret = 0;
     }
 
- out:
+ cleanup:
     VIR_FREE(log);
     VIR_FREE(actualargv);
     virDomainChrSourceDefClear(&monitor_chr);
     virCommandFree(cmd);
     virObjectUnref(vm);
     virObjectUnref(conn);
-    return ret;
-}
-
-
-struct testInfo {
-    const char *name;
-    virQEMUCapsPtr extraFlags;
-    const char *migrateFrom;
-    int migrateFd;
-    unsigned int flags;
-    unsigned int parseFlags;
-};
-
-static int
-testCompareXMLToArgvHelper(const void *data)
-{
-    int result = -1;
-    const struct testInfo *info = data;
-    char *xml = NULL;
-    char *args = NULL;
-    unsigned int flags = info->flags;
-    char *migrateURI = NULL;
-
-    if (info->migrateFrom &&
-        !(migrateURI = qemuMigrationIncomingURI(info->migrateFrom,
-                                                info->migrateFd)))
-        goto cleanup;
-
-    if (virAsprintf(&xml, "%s/qemuxml2argvdata/qemuxml2argv-%s.xml",
-                    abs_srcdir, info->name) < 0 ||
-        virAsprintf(&args, "%s/qemuxml2argvdata/qemuxml2argv-%s.args",
-                    abs_srcdir, info->name) < 0)
-        goto cleanup;
-
-    if (virQEMUCapsGet(info->extraFlags, QEMU_CAPS_MONITOR_JSON))
-        flags |= FLAG_JSON;
-
-    if (virQEMUCapsGet(info->extraFlags, QEMU_CAPS_ENABLE_FIPS))
-        flags |= FLAG_FIPS;
-
-    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, info->name,
-                                info->extraFlags) < 0)
-        goto cleanup;
-
-    result = testCompareXMLToArgvFiles(xml, args, info->extraFlags,
-                                       migrateURI, flags, info->parseFlags);
-
- cleanup:
     VIR_FREE(migrateURI);
     VIR_FREE(xml);
     VIR_FREE(args);
-    return result;
-}
-
-
-static int
-testAddCPUModels(virQEMUCapsPtr caps, bool skipLegacy)
-{
-    const char *newModels[] = {
-        "Opteron_G3", "Opteron_G2", "Opteron_G1",
-        "Nehalem", "Penryn", "Conroe",
-        "Haswell-noTSX", "Haswell",
-    };
-    const char *legacyModels[] = {
-        "n270", "athlon", "pentium3", "pentium2", "pentium",
-        "486", "coreduo", "kvm32", "qemu32", "kvm64",
-        "core2duo", "phenom", "qemu64",
-    };
-    size_t i;
-
-    for (i = 0; i < ARRAY_CARDINALITY(newModels); i++) {
-        if (virQEMUCapsAddCPUDefinition(caps, newModels[i]) < 0)
-            return -1;
-    }
-    if (skipLegacy)
-        return 0;
-    for (i = 0; i < ARRAY_CARDINALITY(legacyModels); i++) {
-        if (virQEMUCapsAddCPUDefinition(caps, legacyModels[i]) < 0)
-            return -1;
-    }
-    return 0;
-}
-
-
-static int
-testPrepareExtraFlags(struct testInfo *info,
-                      bool skipLegacyCPUs,
-                      int gic)
-{
-    int ret = -1;
-
-    if (!(info->extraFlags = virQEMUCapsNew()))
-        goto out;
-
-    if (testAddCPUModels(info->extraFlags, skipLegacyCPUs) < 0)
-        goto out;
-
-    if (testQemuCapsSetGIC(info->extraFlags, gic) < 0)
-        goto out;
-
-    ret = 0;
-
- out:
     return ret;
 }
+
 
 static int
 mymain(void)
@@ -515,11 +538,17 @@ mymain(void)
 
     driver.privileged = true;
 
+    VIR_FREE(driver.config->defaultTLSx509certdir);
+    if (VIR_STRDUP_QUIET(driver.config->defaultTLSx509certdir, "/etc/pki/qemu") < 0)
+        return EXIT_FAILURE;
     VIR_FREE(driver.config->vncTLSx509certdir);
     if (VIR_STRDUP_QUIET(driver.config->vncTLSx509certdir, "/etc/pki/libvirt-vnc") < 0)
         return EXIT_FAILURE;
     VIR_FREE(driver.config->spiceTLSx509certdir);
     if (VIR_STRDUP_QUIET(driver.config->spiceTLSx509certdir, "/etc/pki/libvirt-spice") < 0)
+        return EXIT_FAILURE;
+    VIR_FREE(driver.config->chardevTLSx509certdir);
+    if (VIR_STRDUP_QUIET(driver.config->chardevTLSx509certdir, "/etc/pki/libvirt-chardev") < 0)
         return EXIT_FAILURE;
 
     VIR_FREE(driver.config->stateDir);
@@ -543,15 +572,17 @@ mymain(void)
                       parseFlags, gic, ...)                              \
     do {                                                                 \
         static struct testInfo info = {                                  \
-            name, NULL, migrateFrom, migrateFd, (flags), parseFlags      \
+            name, NULL, migrateFrom, migrateFd, (flags), parseFlags,     \
+            false                                                        \
         };                                                               \
-        if (testPrepareExtraFlags(&info, skipLegacyCPUs, gic) < 0)       \
+        info.skipLegacyCPUs = skipLegacyCPUs;                            \
+        if (testInitQEMUCaps(&info, gic) < 0)                            \
             return EXIT_FAILURE;                                         \
-        virQEMUCapsSetList(info.extraFlags, __VA_ARGS__, QEMU_CAPS_LAST);\
+        virQEMUCapsSetList(info.qemuCaps, __VA_ARGS__, QEMU_CAPS_LAST);  \
         if (virTestRun("QEMU XML-2-ARGV " name,                          \
-                       testCompareXMLToArgvHelper, &info) < 0)           \
+                       testCompareXMLToArgv, &info) < 0)                 \
             ret = -1;                                                    \
-        virObjectUnref(info.extraFlags);                                 \
+        virObjectUnref(info.qemuCaps);                                   \
     } while (0)
 
 # define DO_TEST(name, ...)                                              \
@@ -1403,13 +1434,13 @@ mymain(void)
     DO_TEST_FAILURE("cpu-host-passthrough", NONE);
     DO_TEST_FAILURE("cpu-qemu-host-passthrough", QEMU_CAPS_KVM);
 
-    driver.caps->host.cpu = cpuHaswell;
+    qemuTestSetHostCPU(driver.caps, cpuHaswell);
     DO_TEST("cpu-Haswell", QEMU_CAPS_KVM);
     DO_TEST("cpu-Haswell2", QEMU_CAPS_KVM);
     DO_TEST("cpu-Haswell3", QEMU_CAPS_KVM);
     DO_TEST("cpu-Haswell-noTSX", QEMU_CAPS_KVM);
     DO_TEST("cpu-host-model-cmt", NONE);
-    driver.caps->host.cpu = cpuDefault;
+    qemuTestSetHostCPU(driver.caps, NULL);
 
     DO_TEST("encrypted-disk", NONE);
     DO_TEST("encrypted-disk-usage", NONE);
@@ -1507,10 +1538,14 @@ mymain(void)
             QEMU_CAPS_NODEFCONFIG);
     DO_TEST("pseries-cpu-exact", QEMU_CAPS_CHARDEV,
             QEMU_CAPS_NODEFCONFIG);
+
+    qemuTestSetHostArch(driver.caps, VIR_ARCH_PPC64);
     DO_TEST("pseries-cpu-compat", QEMU_CAPS_KVM,
             QEMU_CAPS_CHARDEV, QEMU_CAPS_NODEFCONFIG);
     DO_TEST("pseries-cpu-le", QEMU_CAPS_KVM,
             QEMU_CAPS_CHARDEV, QEMU_CAPS_NODEFCONFIG);
+    qemuTestSetHostArch(driver.caps, VIR_ARCH_NONE);
+
     DO_TEST("pseries-panic-missing",
             QEMU_CAPS_CHARDEV, QEMU_CAPS_NODEFCONFIG);
     DO_TEST("pseries-panic-no-address",
@@ -1866,6 +1901,11 @@ mymain(void)
             QEMU_CAPS_DEVICE_VIRTIO_RNG, QEMU_CAPS_OBJECT_RNG_RANDOM,
             QEMU_CAPS_OBJECT_GPEX, QEMU_CAPS_DEVICE_PCI_BRIDGE,
             QEMU_CAPS_DEVICE_DMI_TO_PCI_BRIDGE, QEMU_CAPS_VIRTIO_SCSI);
+    DO_TEST("aarch64-video-virtio-gpu-pci",
+            QEMU_CAPS_NODEFCONFIG, QEMU_CAPS_OBJECT_GPEX,
+            QEMU_CAPS_DEVICE_PCI_BRIDGE, QEMU_CAPS_DEVICE_IOH3420,
+            QEMU_CAPS_PCI_MULTIFUNCTION, QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
+            QEMU_CAPS_DEVICE_VIRTIO_GPU, QEMU_CAPS_BOOTINDEX);
     DO_TEST("aarch64-aavmf-virtio-mmio",
             QEMU_CAPS_NODEFCONFIG, QEMU_CAPS_DTB,
             QEMU_CAPS_DEVICE_VIRTIO_MMIO,
@@ -1873,6 +1913,7 @@ mymain(void)
     DO_TEST("aarch64-virt-default-nic",
             QEMU_CAPS_NODEFCONFIG,
             QEMU_CAPS_DEVICE_VIRTIO_MMIO);
+    qemuTestSetHostArch(driver.caps, VIR_ARCH_AARCH64);
     DO_TEST("aarch64-cpu-passthrough",
             QEMU_CAPS_NODEFCONFIG, QEMU_CAPS_DEVICE_VIRTIO_MMIO,
             QEMU_CAPS_KVM);
@@ -1955,15 +1996,13 @@ mymain(void)
     DO_TEST_FAILURE("aarch64-gic-not-arm",
             QEMU_CAPS_KVM, QEMU_CAPS_MACHINE_OPT,
             QEMU_CAPS_MACH_VIRT_GIC_VERSION);
-
-    driver.caps->host.cpu->arch = VIR_ARCH_AARCH64;
     DO_TEST("aarch64-kvm-32-on-64",
             QEMU_CAPS_NODEFCONFIG, QEMU_CAPS_DEVICE_VIRTIO_MMIO,
             QEMU_CAPS_KVM, QEMU_CAPS_CPU_AARCH64_OFF);
     DO_TEST_FAILURE("aarch64-kvm-32-on-64",
             QEMU_CAPS_NODEFCONFIG, QEMU_CAPS_DEVICE_VIRTIO_MMIO,
             QEMU_CAPS_KVM);
-    driver.caps->host.cpu->arch = cpuDefault->arch;
+    qemuTestSetHostArch(driver.caps, VIR_ARCH_NONE);
 
     DO_TEST("kvm-pit-device", QEMU_CAPS_KVM_PIT_TICK_POLICY);
     DO_TEST("kvm-pit-delay", QEMU_CAPS_NO_KVM_PIT);

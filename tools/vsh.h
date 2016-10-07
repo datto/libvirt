@@ -179,6 +179,7 @@ struct _vshCmdDef {
     const vshCmdOptDef *opts;   /* definition of command options */
     const vshCmdInfo *info;     /* details about command */
     unsigned int flags;         /* bitwise OR of VSH_CMD_FLAG */
+    const char *alias;          /* name of the aliased command */
 };
 
 /*
@@ -376,12 +377,14 @@ extern const vshCmdOptDef opts_echo[];
 extern const vshCmdInfo info_echo[];
 extern const vshCmdInfo info_pwd[];
 extern const vshCmdInfo info_quit[];
+extern const vshCmdInfo info_selftest[];
 
 bool cmdHelp(vshControl *ctl, const vshCmd *cmd);
 bool cmdCd(vshControl *ctl, const vshCmd *cmd);
 bool cmdEcho(vshControl *ctl, const vshCmd *cmd);
 bool cmdPwd(vshControl *ctl, const vshCmd *cmd);
 bool cmdQuit(vshControl *ctl, const vshCmd *cmd);
+bool cmdSelfTest(vshControl *ctl, const vshCmd *cmd);
 
 # define VSH_CMD_CD                                     \
     {                                                   \
@@ -435,6 +438,16 @@ bool cmdQuit(vshControl *ctl, const vshCmd *cmd);
         .opts = NULL,                                   \
         .info = info_quit,                              \
         .flags = VSH_CMD_FLAG_NOCONNECT                 \
+    }
+
+# define VSH_CMD_SELF_TEST                              \
+    {                                                   \
+        .name = "self-test",                            \
+        .handler = cmdSelfTest,                         \
+        .opts = NULL,                                   \
+        .info = info_selftest,                          \
+        .flags = VSH_CMD_FLAG_NOCONNECT | VSH_CMD_FLAG_ALIAS,    \
+        .alias = "self-test"                            \
     }
 
 

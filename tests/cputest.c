@@ -215,7 +215,7 @@ cpuTestCompare(const void *arg)
         !(cpu = cpuTestLoadXML(data->arch, data->name)))
         goto cleanup;
 
-    result = cpuCompare(host, cpu, false);
+    result = virCPUCompare(host->arch, host, cpu, false);
     if (data->result == VIR_CPU_COMPARE_ERROR)
         virResetLastError();
 
@@ -360,7 +360,7 @@ cpuTestBaseline(const void *arg)
     for (i = 0; i < ncpus; i++) {
         virCPUCompareResult cmp;
 
-        cmp = cpuCompare(cpus[i], baseline, false);
+        cmp = virCPUCompare(cpus[i]->arch, cpus[i], baseline, false);
         if (cmp != VIR_CPU_COMPARE_SUPERSET &&
             cmp != VIR_CPU_COMPARE_IDENTICAL) {
             VIR_TEST_VERBOSE("\nbaseline CPU is incompatible with CPU %zu\n",
@@ -398,7 +398,7 @@ cpuTestUpdate(const void *arg)
         !(cpu = cpuTestLoadXML(data->arch, data->name)))
         goto cleanup;
 
-    if (cpuUpdate(cpu, host) < 0)
+    if (virCPUUpdate(host->arch, cpu, host) < 0)
         goto cleanup;
 
     if (virAsprintf(&result, "%s+%s", data->host, data->name) < 0)
@@ -430,7 +430,11 @@ cpuTestHasFeature(const void *arg)
                   NULL, NULL, NULL, NULL) < 0)
         goto cleanup;
 
-    result = cpuHasFeature(hostData, data->name);
+    result = virCPUCheckFeature(host->arch, host, data->name);
+
+    if (data->result == result)
+        result = virCPUDataCheckFeature(hostData, data->name);
+
     if (data->result == -1)
         virResetLastError();
 
@@ -622,11 +626,14 @@ mymain(void)
             host "/" cpu " (" #result ")",                              \
             host, cpu, NULL, 0, NULL, 0, result)
 
+#define DO_TEST_UPDATE_ONLY(arch, host, cpu)                            \
+    DO_TEST(arch, cpuTestUpdate,                                        \
+            cpu " on " host,                                            \
+            host, cpu, NULL, 0, NULL, 0, 0)                             \
+
 #define DO_TEST_UPDATE(arch, host, cpu, result)                         \
     do {                                                                \
-        DO_TEST(arch, cpuTestUpdate,                                    \
-                cpu " on " host,                                        \
-                host, cpu, NULL, 0, NULL, 0, 0);                        \
+        DO_TEST_UPDATE_ONLY(arch, host, cpu);                           \
         DO_TEST_COMPARE(arch, host, host "+" cpu, result);              \
     } while (0)
 
@@ -737,8 +744,9 @@ mymain(void)
     DO_TEST_UPDATE("x86", "host", "guest", VIR_CPU_COMPARE_SUPERSET);
     DO_TEST_UPDATE("x86", "host", "host-model", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_UPDATE("x86", "host", "host-model-nofallback", VIR_CPU_COMPARE_IDENTICAL);
-    DO_TEST_UPDATE("x86", "host", "host-passthrough", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_UPDATE("x86", "host-invtsc", "host-model", VIR_CPU_COMPARE_SUPERSET);
+    DO_TEST_UPDATE_ONLY("x86", "host", "host-passthrough");
+    DO_TEST_UPDATE_ONLY("x86", "host", "host-passthrough-features");
 
     DO_TEST_UPDATE("ppc64", "host", "guest", VIR_CPU_COMPARE_IDENTICAL);
     DO_TEST_UPDATE("ppc64", "host", "guest-nofallback", VIR_CPU_COMPARE_INCOMPATIBLE);

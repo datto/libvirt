@@ -1097,7 +1097,8 @@ static int
 phypDomainDefPostParse(virDomainDefPtr def ATTRIBUTE_UNUSED,
                        virCapsPtr caps ATTRIBUTE_UNUSED,
                        unsigned int parseFlags ATTRIBUTE_UNUSED,
-                       void *opaque ATTRIBUTE_UNUSED)
+                       void *opaque ATTRIBUTE_UNUSED,
+                       void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -1108,7 +1109,8 @@ phypDomainDeviceDefPostParse(virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
                              const virDomainDef *def ATTRIBUTE_UNUSED,
                              virCapsPtr caps ATTRIBUTE_UNUSED,
                              unsigned int parseFlags ATTRIBUTE_UNUSED,
-                             void *opaque ATTRIBUTE_UNUSED)
+                             void *opaque ATTRIBUTE_UNUSED,
+                             void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -3575,6 +3577,7 @@ phypDomainCreateXML(virConnectPtr conn,
 
     if (!(def = virDomainDefParseString(xml, phyp_driver->caps,
                                         phyp_driver->xmlopt,
+                                        NULL,
                                         parse_flags)))
         goto err;
 

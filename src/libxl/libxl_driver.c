@@ -718,6 +718,13 @@ libxlStateInitialize(bool privileged,
                        virStrerror(errno, ebuf, sizeof(ebuf)));
         goto error;
     }
+    if (virFileMakePath(cfg->channelDir) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("failed to create channel dir '%s': %s"),
+                       cfg->channelDir,
+                       virStrerror(errno, ebuf, sizeof(ebuf)));
+        goto error;
+    }
 
     if (!(libxl_driver->lockManager =
           virLockManagerPluginNew(cfg->lockManagerName ?
@@ -1027,7 +1034,7 @@ libxlDomainCreateXML(virConnectPtr conn, const char *xml,
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     if (!(def = virDomainDefParseString(xml, cfg->caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainCreateXMLEnsureACL(conn, def) < 0)
@@ -2655,7 +2662,7 @@ libxlConnectDomainXMLToNative(virConnectPtr conn, const char * nativeFormat,
         goto cleanup;
 
     if (!(def = virDomainDefParseString(domainXml,
-                                        cfg->caps, driver->xmlopt,
+                                        cfg->caps, driver->xmlopt, NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
 
@@ -2781,7 +2788,7 @@ libxlDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flag
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     if (!(def = virDomainDefParseString(xml, cfg->caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainDefineXMLFlagsEnsureACL(conn, def) < 0)
@@ -4564,7 +4571,7 @@ libxlDomainGetSchedulerParametersFlags(virDomainPtr dom,
         goto cleanup;
 
     if (*nparams > 1) {
-        if (virTypedParameterAssign(&params[0], VIR_DOMAIN_SCHEDULER_CAP,
+        if (virTypedParameterAssign(&params[1], VIR_DOMAIN_SCHEDULER_CAP,
                                     VIR_TYPED_PARAM_UINT, sc_info.cap) < 0)
             goto cleanup;
     }
@@ -6369,18 +6376,8 @@ libxlConnectCompareCPU(virConnectPtr conn,
 
     cfg = libxlDriverConfigGet(driver);
 
-    if (!cfg->caps->host.cpu ||
-        !cfg->caps->host.cpu->model) {
-        if (failIncompatible) {
-            virReportError(VIR_ERR_CPU_INCOMPATIBLE, "%s",
-                           _("cannot get host CPU capabilities"));
-        } else {
-            VIR_WARN("cannot get host CPU capabilities");
-            ret = VIR_CPU_COMPARE_INCOMPATIBLE;
-        }
-    } else {
-        ret = cpuCompareXML(cfg->caps->host.cpu, xmlDesc, failIncompatible);
-    }
+    ret = virCPUCompareXML(cfg->caps->host.arch, cfg->caps->host.cpu,
+                           xmlDesc, failIncompatible);
 
     virObjectUnref(cfg);
     return ret;

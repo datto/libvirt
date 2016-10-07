@@ -63,6 +63,7 @@
 #include "virauth.h"
 #include "viratomic.h"
 #include "virdomainobjlist.h"
+#include "virhostcpu.h"
 
 #define VIR_FROM_THIS VIR_FROM_TEST
 
@@ -73,6 +74,7 @@ VIR_LOG_INIT("test.test_driver");
 
 struct _testCell {
     unsigned long mem;
+    unsigned long freeMem;
     int numCpus;
     virCapsHostNUMACellCPU cpus[MAX_CPUS];
 };
@@ -307,7 +309,7 @@ testBuildCapabilities(virConnectPtr conn)
     virCapsGuestPtr guest;
     int guest_types[] = { VIR_DOMAIN_OSTYPE_HVM,
                           VIR_DOMAIN_OSTYPE_XEN };
-    size_t i;
+    size_t i, j;
 
     if ((caps = virCapabilitiesNew(VIR_ARCH_I686, false, false)) == NULL)
         goto error;
@@ -317,19 +319,36 @@ testBuildCapabilities(virConnectPtr conn)
     if (virCapabilitiesAddHostFeature(caps, "nonpae") < 0)
         goto error;
 
+    if (VIR_ALLOC_N(caps->host.pagesSize, 2) < 0)
+        goto error;
+
+    caps->host.pagesSize[caps->host.nPagesSize++] = 4;
+    caps->host.pagesSize[caps->host.nPagesSize++] = 2048;
+
     for (i = 0; i < privconn->numCells; i++) {
         virCapsHostNUMACellCPUPtr cpu_cells;
+        virCapsHostNUMACellPageInfoPtr pages;
+        size_t nPages;
 
-        if (VIR_ALLOC_N(cpu_cells, privconn->cells[i].numCpus) < 0)
-            goto error;
+        if (VIR_ALLOC_N(cpu_cells, privconn->cells[i].numCpus) < 0 ||
+            VIR_ALLOC_N(pages, caps->host.nPagesSize) < 0) {
+                VIR_FREE(cpu_cells);
+                goto error;
+            }
+
+        nPages = caps->host.nPagesSize;
 
         memcpy(cpu_cells, privconn->cells[i].cpus,
                sizeof(*cpu_cells) * privconn->cells[i].numCpus);
 
+        for (j = 0; j < nPages; j++)
+            pages[j].size = caps->host.pagesSize[j];
 
-        if (virCapabilitiesAddHostNUMACell(caps, i, 0,
+        pages[0].avail = privconn->cells[i].mem / pages[0].size;
+
+        if (virCapabilitiesAddHostNUMACell(caps, i, privconn->cells[i].mem,
                                            privconn->cells[i].numCpus,
-                                           cpu_cells, 0, NULL, 0, NULL) < 0)
+                                           cpu_cells, 0, NULL, nPages, pages) < 0)
             goto error;
     }
 
@@ -856,7 +875,7 @@ testParseDomains(testDriverPtr privconn,
             goto error;
 
         def = virDomainDefParseNode(ctxt->doc, node,
-                                    privconn->caps, privconn->xmlopt,
+                                    privconn->caps, privconn->xmlopt, NULL,
                                     VIR_DOMAIN_DEF_PARSE_INACTIVE);
         if (!def)
             goto error;
@@ -1264,9 +1283,10 @@ testOpenDefault(virConnectPtr conn)
 
     /* Numa setup */
     privconn->numCells = 2;
-    for (u = 0; u < 2; ++u) {
+    for (u = 0; u < privconn->numCells; ++u) {
         privconn->cells[u].numCpus = 8;
         privconn->cells[u].mem = (u + 1) * 2048 * 1024;
+        privconn->cells[u].freeMem = (u + 1) * 1024 * 1024;
     }
     for (u = 0; u < 16; u++) {
         virBitmapPtr siblings = virBitmapNew(16);
@@ -1501,6 +1521,32 @@ static char *testConnectGetCapabilities(virConnectPtr conn)
     return xml;
 }
 
+static char *
+testConnectGetSysinfo(virConnectPtr conn ATTRIBUTE_UNUSED,
+                      unsigned int flags)
+{
+    char *ret;
+    const char *sysinfo = "<sysinfo type='smbios'>\n"
+           "  <bios>\n"
+           "    <entry name='vendor'>LENOVO</entry>\n"
+           "    <entry name='version'>G4ETA1WW (2.61 )</entry>\n"
+           "    <entry name='date'>05/07/2014</entry>\n"
+           "    <entry name='release'>2.61</entry>\n"
+           "  </bios>\n"
+           "</sysinfo>\n";
+
+    virCheckFlags(0, NULL);
+
+    ignore_value(VIR_STRDUP(ret, sysinfo));
+    return ret;
+}
+
+static const char *
+testConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    return "TEST";
+}
+
 static int testConnectNumOfDomains(virConnectPtr conn)
 {
     testDriverPtr privconn = conn->privateData;
@@ -1563,7 +1609,7 @@ testDomainCreateXML(virConnectPtr conn, const char *xml,
 
     testDriverLock(privconn);
     if ((def = virDomainDefParseString(xml, privconn->caps, privconn->xmlopt,
-                                       parse_flags)) == NULL)
+                                       NULL, parse_flags)) == NULL)
         goto cleanup;
 
     if (testDomainGenerateIfnames(def) < 0)
@@ -2072,7 +2118,7 @@ testDomainRestoreFlags(virConnectPtr conn,
     xml[len] = '\0';
 
     def = virDomainDefParseString(xml, privconn->caps, privconn->xmlopt,
-                                  VIR_DOMAIN_DEF_PARSE_INACTIVE);
+                                  NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE);
     if (!def)
         goto cleanup;
 
@@ -2569,7 +2615,7 @@ static virDomainPtr testDomainDefineXMLFlags(virConnectPtr conn,
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     if ((def = virDomainDefParseString(xml, privconn->caps, privconn->xmlopt,
-                                       parse_flags)) == NULL)
+                                       NULL, parse_flags)) == NULL)
         goto cleanup;
 
     if (testDomainGenerateIfnames(def) < 0)
@@ -2682,6 +2728,92 @@ static int testNodeGetCellsFreeMemory(virConnectPtr conn,
     return ret;
 }
 
+#define TEST_NB_CPU_STATS 4
+
+static int
+testNodeGetCPUStats(virConnectPtr conn ATTRIBUTE_UNUSED,
+                    int cpuNum ATTRIBUTE_UNUSED,
+                    virNodeCPUStatsPtr params,
+                    int *nparams,
+                    unsigned int flags)
+{
+    size_t i = 0;
+
+    virCheckFlags(0, -1);
+
+    if (params == NULL) {
+        *nparams = TEST_NB_CPU_STATS;
+        return 0;
+    }
+
+    for (i = 0; i < *nparams && i < 4; i++) {
+        switch (i) {
+        case 0:
+            if (virHostCPUStatsAssign(&params[i],
+                                      VIR_NODE_CPU_STATS_USER, 9797400000) < 0)
+                return -1;
+            break;
+        case 1:
+            if (virHostCPUStatsAssign(&params[i],
+                                      VIR_NODE_CPU_STATS_KERNEL, 34678723400000) < 0)
+                return -1;
+            break;
+        case 2:
+            if (virHostCPUStatsAssign(&params[i],
+                                      VIR_NODE_CPU_STATS_IDLE, 87264900000) < 0)
+                return -1;
+            break;
+        case 3:
+            if (virHostCPUStatsAssign(&params[i],
+                                      VIR_NODE_CPU_STATS_IOWAIT, 763600000) < 0)
+                return -1;
+            break;
+        }
+    }
+
+    *nparams = i;
+    return 0;
+}
+
+static unsigned long long
+testNodeGetFreeMemory(virConnectPtr conn)
+{
+    testDriverPtr privconn = conn->privateData;
+    unsigned int freeMem = 0;
+    size_t i;
+
+    testDriverLock(privconn);
+
+    for (i = 0; i < privconn->numCells; i++)
+        freeMem += privconn->cells[i].freeMem;
+
+    testDriverUnlock(privconn);
+    return freeMem;
+}
+
+static int
+testNodeGetFreePages(virConnectPtr conn ATTRIBUTE_UNUSED,
+                     unsigned int npages,
+                     unsigned int *pages ATTRIBUTE_UNUSED,
+                     int startCell ATTRIBUTE_UNUSED,
+                     unsigned int cellCount,
+                     unsigned long long *counts,
+                     unsigned int flags)
+{
+    size_t i = 0, j = 0;
+    int x = 6;
+
+    virCheckFlags(0, -1);
+
+    for (i = 0; i < cellCount; i++) {
+        for (j = 0; j < npages; j++) {
+            x = x * 2 + 7;
+            counts[(i * npages) +  j] = x;
+        }
+    }
+
+    return 0;
+}
 
 static int testDomainCreateWithFlags(virDomainPtr domain, unsigned int flags)
 {
@@ -5761,11 +5893,21 @@ testDomainScreenshot(virDomainPtr dom ATTRIBUTE_UNUSED,
 
 static int
 testConnectGetCPUModelNames(virConnectPtr conn ATTRIBUTE_UNUSED,
-                            const char *arch,
+                            const char *archName,
                             char ***models,
                             unsigned int flags)
 {
+    virArch arch;
+
     virCheckFlags(0, -1);
+
+    if (!(arch = virArchFromString(archName))) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("cannot find architecture %s"),
+                       archName);
+        return -1;
+    }
+
     return cpuGetModels(arch, models);
 }
 
@@ -6274,6 +6416,7 @@ testDomainSnapshotCreateXML(virDomainPtr domain,
         if (!(def->dom = virDomainDefCopy(vm->def,
                                           privconn->caps,
                                           privconn->xmlopt,
+                                          NULL,
                                           true)))
             goto cleanup;
 
@@ -6528,8 +6671,8 @@ testDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
     }
 
     snap->def->current = true;
-    config = virDomainDefCopy(snap->def->dom,
-                              privconn->caps, privconn->xmlopt, true);
+    config = virDomainDefCopy(snap->def->dom, privconn->caps,
+                              privconn->xmlopt, NULL, true);
     if (!config)
         goto cleanup;
 
@@ -6674,7 +6817,12 @@ static virHypervisorDriver testHypervisorDriver = {
     .connectGetHostname = testConnectGetHostname, /* 0.6.3 */
     .connectGetMaxVcpus = testConnectGetMaxVcpus, /* 0.3.2 */
     .nodeGetInfo = testNodeGetInfo, /* 0.1.1 */
+    .nodeGetCPUStats = testNodeGetCPUStats, /* 2.3.0 */
+    .nodeGetFreeMemory = testNodeGetFreeMemory, /* 2.3.0 */
+    .nodeGetFreePages = testNodeGetFreePages, /* 2.3.0 */
     .connectGetCapabilities = testConnectGetCapabilities, /* 0.2.1 */
+    .connectGetSysinfo = testConnectGetSysinfo, /* 2.3.0 */
+    .connectGetType = testConnectGetType, /* 2.3.0 */
     .connectListDomains = testConnectListDomains, /* 0.1.1 */
     .connectNumOfDomains = testConnectNumOfDomains, /* 0.1.1 */
     .connectListAllDomains = testConnectListAllDomains, /* 0.9.13 */

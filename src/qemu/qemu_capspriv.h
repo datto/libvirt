@@ -40,14 +40,16 @@ struct _virQEMUCapsCache {
 virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps);
 
 virQEMUCapsPtr
-virQEMUCapsNewForBinaryInternal(const char *binary,
+virQEMUCapsNewForBinaryInternal(virCapsPtr caps,
+                                const char *binary,
                                 const char *libDir,
                                 const char *cacheDir,
                                 uid_t runUid,
                                 gid_t runGid,
                                 bool qmpOnly);
 
-int virQEMUCapsLoadCache(virQEMUCapsPtr qemuCaps,
+int virQEMUCapsLoadCache(virCapsPtr caps,
+                         virQEMUCapsPtr qemuCaps,
                          const char *filename,
                          time_t *qemuctime,
                          time_t *selfctime,
@@ -56,4 +58,11 @@ char *virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps,
                              time_t selfCTime,
                              unsigned long selfVersion);
 
+void
+virQEMUCapsSetArch(virQEMUCapsPtr qemuCaps,
+                   virArch arch);
+
+void
+virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
+                            virCapsPtr caps);
 #endif

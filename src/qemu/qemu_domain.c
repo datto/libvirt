@@ -2326,11 +2326,12 @@ static int
 qemuDomainDefPostParse(virDomainDefPtr def,
                        virCapsPtr caps,
                        unsigned int parseFlags,
-                       void *opaque)
+                       void *opaque,
+                       void *parseOpaque)
 {
     virQEMUDriverPtr driver = opaque;
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-    virQEMUCapsPtr qemuCaps = NULL;
+    virQEMUCapsPtr qemuCaps = parseOpaque;
     int ret = -1;
 
     if (def->os.bootloader || def->os.bootloaderArgs) {
@@ -2359,9 +2360,14 @@ qemuDomainDefPostParse(virDomainDefPtr def,
         !(def->emulator = virDomainDefGetDefaultEmulator(def, caps)))
         goto cleanup;
 
-    if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache,
-                                            def->emulator)))
-        goto cleanup;
+    if (qemuCaps) {
+        virObjectRef(qemuCaps);
+    } else {
+        if (!(qemuCaps = virQEMUCapsCacheLookup(caps,
+                                                driver->qemuCapsCache,
+                                                def->emulator)))
+            goto cleanup;
+    }
 
     if (qemuDomainDefAddDefaultDevices(def, qemuCaps) < 0)
         goto cleanup;
@@ -2390,7 +2396,7 @@ qemuDomainDefPostParse(virDomainDefPtr def,
 
 static int
 qemuDomainDefValidate(const virDomainDef *def,
-                      virCapsPtr caps ATTRIBUTE_UNUSED,
+                      virCapsPtr caps,
                       void *opaque)
 {
     virQEMUDriverPtr driver = opaque;
@@ -2398,7 +2404,8 @@ qemuDomainDefValidate(const virDomainDef *def,
     size_t topologycpus;
     int ret = -1;
 
-    if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache,
+    if (!(qemuCaps = virQEMUCapsCacheLookup(caps,
+                                            driver->qemuCapsCache,
                                             def->emulator)))
         goto cleanup;
 
@@ -2552,16 +2559,22 @@ qemuDomainChrDefDropDefaultPath(virDomainChrDefPtr chr,
 static int
 qemuDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                              const virDomainDef *def,
-                             virCapsPtr caps ATTRIBUTE_UNUSED,
+                             virCapsPtr caps,
                              unsigned int parseFlags,
-                             void *opaque)
+                             void *opaque,
+                             void *parseOpaque)
 {
     virQEMUDriverPtr driver = opaque;
-    virQEMUCapsPtr qemuCaps = NULL;
+    virQEMUCapsPtr qemuCaps = parseOpaque;
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     int ret = -1;
 
-    qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache, def->emulator);
+    if (qemuCaps) {
+        virObjectRef(qemuCaps);
+    } else {
+        qemuCaps = virQEMUCapsCacheLookup(caps, driver->qemuCapsCache,
+                                          def->emulator);
+    }
 
     if (dev->type == VIR_DOMAIN_DEVICE_NET &&
         dev->data.net->type != VIR_DOMAIN_NET_TYPE_HOSTDEV &&
@@ -2758,18 +2771,24 @@ qemuDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
 
 static int
 qemuDomainDefAssignAddresses(virDomainDef *def,
-                             virCapsPtr caps ATTRIBUTE_UNUSED,
+                             virCapsPtr caps,
                              unsigned int parseFlags ATTRIBUTE_UNUSED,
-                             void *opaque)
+                             void *opaque,
+                             void *parseOpaque)
 {
     virQEMUDriverPtr driver = opaque;
-    virQEMUCapsPtr qemuCaps = NULL;
+    virQEMUCapsPtr qemuCaps = parseOpaque;
     int ret = -1;
     bool newDomain = parseFlags & VIR_DOMAIN_DEF_PARSE_ABI_UPDATE;
 
-    if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache,
-                                            def->emulator)))
-        goto cleanup;
+    if (qemuCaps) {
+        virObjectRef(qemuCaps);
+    } else {
+        if (!(qemuCaps = virQEMUCapsCacheLookup(caps,
+                                                driver->qemuCapsCache,
+                                                def->emulator)))
+            goto cleanup;
+    }
 
     if (qemuDomainAssignAddresses(def, qemuCaps, NULL, newDomain) < 0)
         goto cleanup;
@@ -3359,7 +3378,7 @@ qemuDomainDefCopy(virQEMUDriverPtr driver,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
-    if (!(ret = virDomainDefParseString(xml, caps, driver->xmlopt,
+    if (!(ret = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto cleanup;
@@ -3386,7 +3405,7 @@ qemuDomainDefFormatBuf(virQEMUDriverPtr driver,
     if (!(flags & (VIR_DOMAIN_XML_UPDATE_CPU | VIR_DOMAIN_XML_MIGRATABLE)))
         goto format;
 
-    if (!(copy = virDomainDefCopy(def, caps, driver->xmlopt,
+    if (!(copy = virDomainDefCopy(def, caps, driver->xmlopt, NULL,
                                   flags & VIR_DOMAIN_XML_MIGRATABLE)))
         goto cleanup;
 
@@ -3395,15 +3414,9 @@ qemuDomainDefFormatBuf(virQEMUDriverPtr driver,
     /* Update guest CPU requirements according to host CPU */
     if ((flags & VIR_DOMAIN_XML_UPDATE_CPU) &&
         def->cpu &&
-        (def->cpu->mode != VIR_CPU_MODE_CUSTOM || def->cpu->model)) {
-        if (!caps->host.cpu ||
-            !caps->host.cpu->model) {
-            virReportError(VIR_ERR_OPERATION_FAILED,
-                           "%s", _("cannot get host CPU capabilities"));
-            goto cleanup;
-        }
-
-        if (cpuUpdate(def->cpu, caps->host.cpu) < 0)
+        (def->cpu->mode != VIR_CPU_MODE_CUSTOM ||
+         def->cpu->model)) {
+        if (virCPUUpdate(def->os.arch, def->cpu, caps->host.cpu) < 0)
             goto cleanup;
     }
 
@@ -3538,10 +3551,13 @@ char *qemuDomainFormatXML(virQEMUDriverPtr driver,
 {
     virDomainDefPtr def;
 
-    if ((flags & VIR_DOMAIN_XML_INACTIVE) && vm->newDef)
+    if ((flags & VIR_DOMAIN_XML_INACTIVE) && vm->newDef) {
         def = vm->newDef;
-    else
+    } else {
         def = vm->def;
+        if (virDomainObjIsActive(vm))
+            flags &= ~VIR_DOMAIN_XML_UPDATE_CPU;
+    }
 
     return qemuDomainDefFormatXML(driver, def, flags);
 }
@@ -5941,15 +5957,11 @@ qemuDomainRefreshVcpuInfo(virQEMUDriverPtr driver,
         vcpupriv->enable_id = info[i].id;
 
         if (hotplug && state) {
-            vcpu->online = !!info[i].qom_path;
-
-            /* mark cpus that don't have an alias as non-hotpluggable */
-            if (vcpu->online) {
-                if (vcpupriv->alias)
-                    vcpu->hotpluggable = VIR_TRISTATE_BOOL_YES;
-                else
-                    vcpu->hotpluggable = VIR_TRISTATE_BOOL_NO;
-            }
+            vcpu->online = info[i].online;
+            if (info[i].hotpluggable)
+                vcpu->hotpluggable = VIR_TRISTATE_BOOL_YES;
+            else
+                vcpu->hotpluggable = VIR_TRISTATE_BOOL_NO;
         }
     }
 
@@ -6057,6 +6069,19 @@ qemuDomainPrepareChannel(virDomainChrDefPtr channel,
     }
 
     return 0;
+}
+
+
+int
+qemuDomainPrepareShmemChardev(virDomainShmemDefPtr shmem)
+{
+    if (!shmem->server.enabled ||
+        shmem->server.chr.data.nix.path)
+        return 0;
+
+    return virAsprintf(&shmem->server.chr.data.nix.path,
+                       "/var/lib/libvirt/shmem-%s-sock",
+                       shmem->name);
 }
 
 

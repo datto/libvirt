@@ -45,7 +45,7 @@ struct _virCPUData {
 
 
 typedef virCPUCompareResult
-(*cpuArchCompare)   (virCPUDefPtr host,
+(*virCPUArchCompare)(virCPUDefPtr host,
                      virCPUDefPtr cpu,
                      bool failIncompatible);
 
@@ -87,12 +87,16 @@ typedef virCPUDefPtr
                      unsigned int flags);
 
 typedef int
-(*cpuArchUpdate)    (virCPUDefPtr guest,
-                     const virCPUDef *host);
+(*virCPUArchUpdate)(virCPUDefPtr guest,
+                    const virCPUDef *host);
 
 typedef int
-(*cpuArchHasFeature) (const virCPUData *data,
-                      const char *feature);
+(*virCPUArchCheckFeature)(const virCPUDef *cpu,
+                          const char *feature);
+
+typedef int
+(*virCPUArchDataCheckFeature)(const virCPUData *data,
+                              const char *feature);
 
 typedef char *
 (*cpuArchDataFormat)(const virCPUData *data);
@@ -103,36 +107,44 @@ typedef virCPUDataPtr
 typedef int
 (*cpuArchGetModels) (char ***models);
 
+typedef int
+(*virCPUArchTranslate)(virCPUDefPtr cpu,
+                       const char **models,
+                       unsigned int nmodels);
+
 struct cpuArchDriver {
     const char *name;
     const virArch *arch;
     unsigned int narch;
-    cpuArchCompare      compare;
+    virCPUArchCompare   compare;
     cpuArchDecode       decode;
     cpuArchEncode       encode;
     cpuArchDataFree     free;
     cpuArchNodeData     nodeData;
     cpuArchGuestData    guestData;
     cpuArchBaseline     baseline;
-    cpuArchUpdate       update;
-    cpuArchHasFeature    hasFeature;
+    virCPUArchUpdate    update;
+    virCPUArchCheckFeature checkFeature;
+    virCPUArchDataCheckFeature dataCheckFeature;
     cpuArchDataFormat   dataFormat;
     cpuArchDataParse    dataParse;
     cpuArchGetModels    getModels;
+    virCPUArchTranslate translate;
 };
 
 
 virCPUCompareResult
-cpuCompareXML(virCPUDefPtr host,
-              const char *xml,
-              bool failIncompatible)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+virCPUCompareXML(virArch arch,
+                 virCPUDefPtr host,
+                 const char *xml,
+                 bool failIncompatible);
 
 virCPUCompareResult
-cpuCompare  (virCPUDefPtr host,
-             virCPUDefPtr cpu,
-             bool failIncompatible)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+virCPUCompare(virArch arch,
+              virCPUDefPtr host,
+              virCPUDefPtr cpu,
+              bool failIncompatible)
+    ATTRIBUTE_NONNULL(3);
 
 int
 cpuDecode   (virCPUDefPtr cpu,
@@ -182,13 +194,22 @@ cpuBaseline (virCPUDefPtr *cpus,
     ATTRIBUTE_NONNULL(1);
 
 int
-cpuUpdate   (virCPUDefPtr guest,
+virCPUUpdate(virArch arch,
+             virCPUDefPtr guest,
              const virCPUDef *host)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+    ATTRIBUTE_NONNULL(2);
+
 
 int
-cpuHasFeature(const virCPUData *data,
-              const char *feature)
+virCPUCheckFeature(virArch arch,
+                   const virCPUDef *cpu,
+                   const char *feature)
+    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+
+
+int
+virCPUDataCheckFeature(const virCPUData *data,
+                       const char *feature)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 
@@ -199,8 +220,15 @@ cpuModelIsAllowed(const char *model,
     ATTRIBUTE_NONNULL(1);
 
 int
-cpuGetModels(const char *arch, char ***models)
-    ATTRIBUTE_NONNULL(1);
+cpuGetModels(virArch arch, char ***models);
+
+int
+virCPUTranslate(virArch arch,
+                virCPUDefPtr cpu,
+                char **models,
+                unsigned int nmodels)
+    ATTRIBUTE_NONNULL(2);
+
 
 /* cpuDataFormat and cpuDataParse are implemented for unit tests only and
  * have no real-life usage

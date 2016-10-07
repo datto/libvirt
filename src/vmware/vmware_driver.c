@@ -86,7 +86,8 @@ static int
 vmwareDomainDefPostParse(virDomainDefPtr def ATTRIBUTE_UNUSED,
                          virCapsPtr caps ATTRIBUTE_UNUSED,
                          unsigned int parseFlags ATTRIBUTE_UNUSED,
-                         void *opaque ATTRIBUTE_UNUSED)
+                         void *opaque ATTRIBUTE_UNUSED,
+                         void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -96,7 +97,8 @@ vmwareDomainDeviceDefPostParse(virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
                                const virDomainDef *def ATTRIBUTE_UNUSED,
                                virCapsPtr caps ATTRIBUTE_UNUSED,
                                unsigned int parseFlags ATTRIBUTE_UNUSED,
-                               void *opaque ATTRIBUTE_UNUSED)
+                               void *opaque ATTRIBUTE_UNUSED,
+                               void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -387,7 +389,7 @@ vmwareDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fla
 
     vmwareDriverLock(driver);
     if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                         parse_flags)) == NULL)
+                                         NULL, parse_flags)) == NULL)
         goto cleanup;
 
     /* generate vmx file */
@@ -681,7 +683,7 @@ vmwareDomainCreateXML(virConnectPtr conn, const char *xml,
     vmwareDriverLock(driver);
 
     if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                         parse_flags)) == NULL)
+                                         NULL, parse_flags)) == NULL)
         goto cleanup;
 
     /* generate vmx file */

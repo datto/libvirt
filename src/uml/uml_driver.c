@@ -410,7 +410,8 @@ umlDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                             const virDomainDef *def ATTRIBUTE_UNUSED,
                             virCapsPtr caps ATTRIBUTE_UNUSED,
                             unsigned int parseFlags ATTRIBUTE_UNUSED,
-                            void *opaque ATTRIBUTE_UNUSED)
+                            void *opaque ATTRIBUTE_UNUSED,
+                            void *parseOpaque ATTRIBUTE_UNUSED)
 {
     if (dev->type == VIR_DOMAIN_DEVICE_CHR &&
         dev->data.chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
@@ -435,7 +436,8 @@ static int
 umlDomainDefPostParse(virDomainDefPtr def ATTRIBUTE_UNUSED,
                       virCapsPtr caps ATTRIBUTE_UNUSED,
                       unsigned int parseFlags ATTRIBUTE_UNUSED,
-                      void *opaque ATTRIBUTE_UNUSED)
+                      void *opaque ATTRIBUTE_UNUSED,
+                      void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -1588,7 +1590,7 @@ static virDomainPtr umlDomainCreateXML(virConnectPtr conn, const char *xml,
     virNWFilterReadLockFilterUpdates();
     umlDriverLock(driver);
     if (!(def = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainCreateXMLEnsureACL(conn, def) < 0)
@@ -2069,7 +2071,7 @@ umlDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
 
     umlDriverLock(driver);
     if (!(def = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainDefineXMLFlagsEnsureACL(conn, def) < 0)

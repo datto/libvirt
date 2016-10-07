@@ -18,6 +18,38 @@
       </enum>
     </loader>
   </os>
+  <cpu>
+    <mode name='host-passthrough' supported='yes'/>
+    <mode name='host-model' supported='yes'>
+      <model fallback='allow'>Broadwell</model>
+    </mode>
+    <mode name='custom' supported='yes'>
+      <model usable='unknown'>Opteron_G5</model>
+      <model usable='unknown'>Opteron_G4</model>
+      <model usable='unknown'>Opteron_G3</model>
+      <model usable='unknown'>Opteron_G2</model>
+      <model usable='unknown'>Opteron_G1</model>
+      <model usable='unknown'>Haswell</model>
+      <model usable='unknown'>SandyBridge</model>
+      <model usable='unknown'>Westmere</model>
+      <model usable='unknown'>Nehalem</model>
+      <model usable='unknown'>Penryn</model>
+      <model usable='unknown'>Conroe</model>
+      <model usable='unknown'>n270</model>
+      <model usable='unknown'>athlon</model>
+      <model usable='unknown'>pentium3</model>
+      <model usable='unknown'>pentium2</model>
+      <model usable='unknown'>pentium</model>
+      <model usable='unknown'>486</model>
+      <model usable='unknown'>coreduo</model>
+      <model usable='unknown'>kvm32</model>
+      <model usable='unknown'>qemu32</model>
+      <model usable='unknown'>kvm64</model>
+      <model usable='unknown'>core2duo</model>
+      <model usable='unknown'>phenom</model>
+      <model usable='unknown'>qemu64</model>
+    </mode>
+  </cpu>
   <devices>
     <disk supported='yes'>
       <enum name='diskDevice'>

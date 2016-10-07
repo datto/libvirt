@@ -66,11 +66,14 @@ virCapabilitiesSetNetPrefix;
 virCPUDefAddFeature;
 virCPUDefCopy;
 virCPUDefCopyModel;
+virCPUDefCopyModelFilter;
+virCPUDefCopyWithoutModel;
 virCPUDefFormat;
 virCPUDefFormatBuf;
 virCPUDefFree;
 virCPUDefFreeModel;
 virCPUDefParseXML;
+virCPUDefStealModel;
 virCPUDefUpdateFeature;
 virCPUModeTypeToString;
 
@@ -153,6 +156,13 @@ virDomainAuditVcpu;
 
 
 # conf/domain_capabilities.h
+virDomainCapsCPUModelsAdd;
+virDomainCapsCPUModelsAddSteal;
+virDomainCapsCPUModelsCopy;
+virDomainCapsCPUModelsFilter;
+virDomainCapsCPUModelsNew;
+virDomainCapsCPUUsableTypeFromString;
+virDomainCapsCPUUsableTypeToString;
 virDomainCapsEnumClear;
 virDomainCapsEnumSet;
 virDomainCapsFormat;
@@ -254,6 +264,7 @@ virDomainDefSetMemoryTotal;
 virDomainDefSetVcpus;
 virDomainDefSetVcpusMax;
 virDomainDefValidate;
+virDomainDefVcpuOrderClear;
 virDomainDeleteConfig;
 virDomainDeviceAddressIsValid;
 virDomainDeviceAddressTypeToString;
@@ -417,6 +428,7 @@ virDomainObjFormat;
 virDomainObjGetDefs;
 virDomainObjGetMetadata;
 virDomainObjGetOneDef;
+virDomainObjGetOneDefState;
 virDomainObjGetPersistentDef;
 virDomainObjGetShortName;
 virDomainObjGetState;
@@ -454,6 +466,11 @@ virDomainSaveStatus;
 virDomainSaveXML;
 virDomainSeclabelTypeFromString;
 virDomainSeclabelTypeToString;
+virDomainShmemDefEquals;
+virDomainShmemDefFind;
+virDomainShmemDefFree;
+virDomainShmemDefInsert;
+virDomainShmemDefRemove;
 virDomainShutdownReasonTypeFromString;
 virDomainShutdownReasonTypeToString;
 virDomainShutoffReasonTypeFromString;
@@ -954,8 +971,6 @@ virSecretObjSetValueSize;
 # cpu/cpu.h
 cpuBaseline;
 cpuBaselineXML;
-cpuCompare;
-cpuCompareXML;
 cpuDataFormat;
 cpuDataFree;
 cpuDataParse;
@@ -963,9 +978,13 @@ cpuDecode;
 cpuEncode;
 cpuGetModels;
 cpuGuestData;
-cpuHasFeature;
 cpuNodeData;
-cpuUpdate;
+virCPUCheckFeature;
+virCPUCompare;
+virCPUCompareXML;
+virCPUDataCheckFeature;
+virCPUTranslate;
+virCPUUpdate;
 
 
 # cpu/cpu_x86.h
@@ -1095,6 +1114,7 @@ virHostCPUGetOnlineBitmap;
 virHostCPUGetPresentBitmap;
 virHostCPUGetStats;
 virHostCPUGetThreadsPerSubcore;
+virHostCPUStatsAssign;
 virHostMemAllocPages;
 virHostMemGetCellsFree;
 virHostMemGetFreePages;
@@ -1801,6 +1821,7 @@ virJSONValueObjectHasKey;
 virJSONValueObjectIsNull;
 virJSONValueObjectKeysNumber;
 virJSONValueObjectRemoveKey;
+virJSONValueObjectStealArray;
 virJSONValueToString;
 
 
@@ -1851,6 +1872,7 @@ virLockSpaceReleaseResourcesForOwner;
 virLogDefineFilter;
 virLogDefineOutput;
 virLogFilterFree;
+virLogFilterListFree;
 virLogGetDefaultPriority;
 virLogGetFilters;
 virLogGetNbFilters;
@@ -2059,7 +2081,7 @@ virNodeSuspendGetTargetMask;
 # util/virnuma.h
 virNumaGetAutoPlacementAdvice;
 virNumaGetDistances;
-virNumaGetHostNodeset;
+virNumaGetHostMemoryNodeset;
 virNumaGetMaxNode;
 virNumaGetNodeMemory;
 virNumaGetPageInfo;

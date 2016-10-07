@@ -81,6 +81,11 @@ struct _qemuAgentMessage {
      * fatal error occurred on the monitor channel
      */
     bool finished;
+    /* true for sync command */
+    bool sync;
+    /* id of the issued sync comand */
+    unsigned long long id;
+    bool first;
 };
 
 
@@ -308,12 +313,19 @@ qemuAgentIOProcessLine(qemuAgentPtr mon,
 {
     virJSONValuePtr obj = NULL;
     int ret = -1;
-    unsigned long long id;
 
     VIR_DEBUG("Line [%s]", line);
 
-    if (!(obj = virJSONValueFromString(line)))
+    if (!(obj = virJSONValueFromString(line))) {
+        /* receiving garbage on first sync is regular situation */
+        if (msg && msg->sync && msg->first) {
+            VIR_DEBUG("Received garbage on sync");
+            msg->finished = 1;
+            return 0;
+        }
+
         goto cleanup;
+    }
 
     if (obj->type != VIR_JSON_TYPE_OBJECT) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -328,28 +340,32 @@ qemuAgentIOProcessLine(qemuAgentPtr mon,
     } else if (virJSONValueObjectHasKey(obj, "error") == 1 ||
                virJSONValueObjectHasKey(obj, "return") == 1) {
         if (msg) {
+            if (msg->sync) {
+                unsigned long long id;
+
+                if (virJSONValueObjectGetNumberUlong(obj, "return", &id) < 0) {
+                    VIR_DEBUG("Ignoring delayed reply on sync");
+                    ret = 0;
+                    goto cleanup;
+                }
+
+                VIR_DEBUG("Guest returned ID: %llu", id);
+
+                if (msg->id != id) {
+                    VIR_DEBUG("Guest agent returned ID: %llu instead of %llu",
+                              id, msg->id);
+                    ret = 0;
+                    goto cleanup;
+                }
+            }
             msg->rxObject = obj;
             msg->finished = 1;
             obj = NULL;
-            ret = 0;
         } else {
-            /* If we've received something like:
-             *  {"return": 1234}
-             * it is likely that somebody started GA
-             * which is now processing our previous
-             * guest-sync commands. Check if this is
-             * the case and don't report an error but
-             * return silently.
-             */
-            if (virJSONValueObjectGetNumberUlong(obj, "return", &id) == 0) {
-                VIR_DEBUG("Ignoring delayed reply to guest-sync: %llu", id);
-                ret = 0;
-                goto cleanup;
-            }
-
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Unexpected JSON reply '%s'"), line);
+            /* we are out of sync */
+            VIR_DEBUG("Ignoring delayed reply");
         }
+        ret = 0;
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Unknown JSON reply '%s'"), line);
@@ -633,7 +649,7 @@ qemuAgentIO(int watch, int fd, int events, void *opaque)
         if (!error &&
             events & VIR_EVENT_HANDLE_HANGUP) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("End of file from monitor"));
+                           _("End of file from agent monitor"));
             eof = true;
             events &= ~VIR_EVENT_HANDLE_HANGUP;
         }
@@ -940,11 +956,14 @@ qemuAgentGuestSync(qemuAgentPtr mon)
 {
     int ret = -1;
     int send_ret;
-    unsigned long long id, id_ret;
+    unsigned long long id;
     qemuAgentMessage sync_msg;
 
     memset(&sync_msg, 0, sizeof(sync_msg));
+    /* set only on first sync */
+    sync_msg.first = true;
 
+ retry:
     if (virTimeMillisNow(&id) < 0)
         return -1;
 
@@ -954,6 +973,8 @@ qemuAgentGuestSync(qemuAgentPtr mon)
         return -1;
 
     sync_msg.txLength = strlen(sync_msg.txBuffer);
+    sync_msg.sync = true;
+    sync_msg.id = id;
 
     VIR_DEBUG("Sending guest-sync command with ID: %llu", id);
 
@@ -966,25 +987,21 @@ qemuAgentGuestSync(qemuAgentPtr mon)
         goto cleanup;
 
     if (!sync_msg.rxObject) {
-        virReportError(VIR_ERR_AGENT_UNSYNCED, "%s",
-                       _("Missing monitor reply object"));
-        goto cleanup;
+        if (sync_msg.first) {
+            VIR_FREE(sync_msg.txBuffer);
+            memset(&sync_msg, 0, sizeof(sync_msg));
+            goto retry;
+        } else {
+            if (mon->running)
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                               _("Missing monitor reply object"));
+            else
+                virReportError(VIR_ERR_AGENT_UNRESPONSIVE, "%s",
+                               _("Guest agent disappeared while executing command"));
+            goto cleanup;
+        }
     }
 
-    if (virJSONValueObjectGetNumberUlong(sync_msg.rxObject,
-                                         "return", &id_ret) < 0) {
-        virReportError(VIR_ERR_AGENT_UNSYNCED, "%s",
-                       _("Malformed return value"));
-        goto cleanup;
-    }
-
-    VIR_DEBUG("Guest returned ID: %llu", id_ret);
-    if (id_ret != id) {
-        virReportError(VIR_ERR_AGENT_UNSYNCED,
-                       _("Guest agent returned ID: %llu instead of %llu"),
-                       id_ret, id);
-        goto cleanup;
-    }
     ret = 0;
 
  cleanup:

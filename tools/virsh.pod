@@ -1959,7 +1959,7 @@ Therefore, -1 is a useful shorthand for 262144. On the Linux kernel, the
 values 0 and 1 are automatically converted to a minimal value of 2.
 
 B<Note>: The weight and cap parameters are defined only for the
-XEN_CREDIT scheduler and are now I<DEPRECATED>.
+XEN_CREDIT scheduler.
 
 B<Note>: The vcpu_period, emulator_period, and iothread_period parameters
 have a valid value range of 1000-1000000 or 0, and the vcpu_quota,
@@ -2316,7 +2316,7 @@ exclusive. If no flag is specified, behavior is different depending
 on hypervisor.
 
 =item B<setvcpus> I<domain> I<count> [I<--maximum>] [[I<--config>]
-[I<--live>] | [I<--current>]] [I<--guest>]
+[I<--live>] | [I<--current>]] [I<--guest>] [I<--hotpluggable>]
 
 Change the number of virtual CPUs active in a guest domain.  By default,
 this command works on active guest domains.  To change the settings for an
@@ -2347,6 +2347,11 @@ persistent.
 If I<--guest> is specified, then the count of cpus is modified in the guest
 instead of the hypervisor. This flag is usable only for live domains
 and may require guest agent to be configured in the guest.
+
+To allow adding vcpus to persistent definitions that can be later hotunplugged
+after the domain is booted it is necessary to specify the I<--hotpluggable>
+flag. Vcpus added to live domains supporting vcpu unplug are automatically
+marked as hotpluggable.
 
 The I<--maximum> flag controls the maximum number of virtual cpus that can
 be hot-plugged the next time the domain is booted.  As such, it must only be
@@ -2936,8 +2941,6 @@ make that device unusable by the rest of the physical host until a reboot.
 Detach I<nodedev> from the host, so that it can safely be used by
 guests via <hostdev> passthrough.  This is reversed with
 B<nodedev-reattach>, and is done automatically for managed devices.
-For compatibility purposes, this command can also be spelled
-B<nodedev-dettach>.
 
 Different backend drivers expect the device to be bound to different
 dummy devices. For example, QEMU's "kvm" backend driver (the default)

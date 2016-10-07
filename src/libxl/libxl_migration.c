@@ -419,6 +419,7 @@ libxlDomainMigrationBegin(virConnectPtr conn,
     if (xmlin) {
         if (!(tmpdef = virDomainDefParseString(xmlin, cfg->caps,
                                                driver->xmlopt,
+                                               NULL,
                                                VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
             goto endjob;
@@ -463,6 +464,7 @@ libxlDomainMigrationPrepareDef(libxlDriverPrivatePtr driver,
     }
 
     if (!(def = virDomainDefParseString(dom_xml, cfg->caps, driver->xmlopt,
+                                        NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto cleanup;
@@ -544,6 +546,7 @@ libxlDomainMigrationPrepare(virConnectPtr dconn,
 
                 VIR_DEBUG("Using hook-filtered domain XML: %s", xmlout);
                 newdef = virDomainDefParseString(xmlout, cfg->caps, driver->xmlopt,
+                                                 NULL,
                                                  VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                  VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
                 if (!newdef)
@@ -1019,6 +1022,29 @@ libxlDomainMigrationFinish(virConnectPtr dconn,
     if (event) {
         libxlDomainEventQueue(driver, event);
         event = NULL;
+    }
+
+    if (flags & VIR_MIGRATE_PERSIST_DEST) {
+        unsigned int oldPersist = vm->persistent;
+        virDomainDefPtr vmdef;
+
+        vm->persistent = 1;
+        if (!(vmdef = virDomainObjGetPersistentDef(cfg->caps,
+                                                   driver->xmlopt, vm)))
+            goto cleanup;
+
+        if (virDomainSaveConfig(cfg->configDir, cfg->caps, vmdef) < 0)
+            goto cleanup;
+
+        event = virDomainEventLifecycleNewFromObj(vm,
+                                         VIR_DOMAIN_EVENT_DEFINED,
+                                         oldPersist ?
+                                         VIR_DOMAIN_EVENT_DEFINED_UPDATED :
+                                         VIR_DOMAIN_EVENT_DEFINED_ADDED);
+        if (event) {
+            libxlDomainEventQueue(driver, event);
+            event = NULL;
+        }
     }
 
     if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, cfg->caps) < 0)

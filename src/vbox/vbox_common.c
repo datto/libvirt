@@ -255,7 +255,8 @@ static int
 vboxDomainDefPostParse(virDomainDefPtr def ATTRIBUTE_UNUSED,
                        virCapsPtr caps ATTRIBUTE_UNUSED,
                        unsigned int parseFlags ATTRIBUTE_UNUSED,
-                       void *opaque ATTRIBUTE_UNUSED)
+                       void *opaque ATTRIBUTE_UNUSED,
+                       void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -265,7 +266,8 @@ vboxDomainDeviceDefPostParse(virDomainDeviceDefPtr dev ATTRIBUTE_UNUSED,
                              const virDomainDef *def ATTRIBUTE_UNUSED,
                              virCapsPtr caps ATTRIBUTE_UNUSED,
                              unsigned int parseFlags ATTRIBUTE_UNUSED,
-                             void *opaque ATTRIBUTE_UNUSED)
+                             void *opaque ATTRIBUTE_UNUSED,
+                             void *parseOpaque ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -1873,7 +1875,7 @@ vboxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags
 
     VBOX_IID_INITIALIZE(&mchiid);
     if (!(def = virDomainDefParseString(xml, data->caps, data->xmlopt,
-                                        parse_flags))) {
+                                        NULL, parse_flags))) {
         goto cleanup;
     }
 

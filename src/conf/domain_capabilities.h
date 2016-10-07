@@ -102,6 +102,40 @@ struct _virDomainCapsFeatureGIC {
     virDomainCapsEnum version; /* Info about virGICVersion */
 };
 
+typedef enum {
+    VIR_DOMCAPS_CPU_USABLE_UNKNOWN,
+    VIR_DOMCAPS_CPU_USABLE_YES,
+    VIR_DOMCAPS_CPU_USABLE_NO,
+
+    VIR_DOMCAPS_CPU_USABLE_LAST
+} virDomainCapsCPUUsable;
+VIR_ENUM_DECL(virDomainCapsCPUUsable);
+
+typedef struct _virDomainCapsCPUModel virDomainCapsCPUModel;
+typedef virDomainCapsCPUModel *virDomainCapsCPUModelPtr;
+struct _virDomainCapsCPUModel {
+    char *name;
+    virDomainCapsCPUUsable usable;
+};
+
+typedef struct _virDomainCapsCPUModels virDomainCapsCPUModels;
+typedef virDomainCapsCPUModels *virDomainCapsCPUModelsPtr;
+struct _virDomainCapsCPUModels {
+    virObject parent;
+
+    size_t nmodels_max;
+    size_t nmodels;
+    virDomainCapsCPUModelPtr models;
+};
+
+typedef struct _virDomainCapsCPU virDomainCapsCPU;
+typedef virDomainCapsCPU *virDomainCapsCPUPtr;
+struct _virDomainCapsCPU {
+    bool hostPassthrough;
+    virCPUDefPtr hostModel;
+    virDomainCapsCPUModelsPtr custom;
+};
+
 struct _virDomainCaps {
     virObjectLockable parent;
 
@@ -114,6 +148,7 @@ struct _virDomainCaps {
     int maxvcpus;
 
     virDomainCapsOS os;
+    virDomainCapsCPU cpu;
     virDomainCapsDeviceDisk disk;
     virDomainCapsDeviceGraphics graphics;
     virDomainCapsDeviceVideo video;
@@ -128,6 +163,18 @@ virDomainCapsPtr virDomainCapsNew(const char *path,
                                   const char *machine,
                                   virArch arch,
                                   virDomainVirtType virttype);
+
+virDomainCapsCPUModelsPtr virDomainCapsCPUModelsNew(size_t nmodels);
+virDomainCapsCPUModelsPtr virDomainCapsCPUModelsCopy(virDomainCapsCPUModelsPtr old);
+virDomainCapsCPUModelsPtr virDomainCapsCPUModelsFilter(virDomainCapsCPUModelsPtr old,
+                                                       const char **models);
+int virDomainCapsCPUModelsAddSteal(virDomainCapsCPUModelsPtr cpuModels,
+                                   char **name,
+                                   virDomainCapsCPUUsable usable);
+int virDomainCapsCPUModelsAdd(virDomainCapsCPUModelsPtr cpuModels,
+                              const char *name,
+                              ssize_t nameLen,
+                              virDomainCapsCPUUsable usable);
 
 # define VIR_DOMAIN_CAPS_ENUM_SET(capsEnum, ...)            \
     do {                                                    \

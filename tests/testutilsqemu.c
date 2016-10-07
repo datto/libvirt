@@ -16,21 +16,22 @@
 
 virCPUDefPtr cpuDefault;
 virCPUDefPtr cpuHaswell;
+virCPUDefPtr cpuPower8;
 
 static virCPUFeatureDef cpuDefaultFeatures[] = {
-    { (char *) "lahf_lm",   -1 },
-    { (char *) "xtpr",      -1 },
-    { (char *) "cx16",      -1 },
-    { (char *) "tm2",       -1 },
-    { (char *) "est",       -1 },
-    { (char *) "vmx",       -1 },
-    { (char *) "ds_cpl",    -1 },
-    { (char *) "pbe",       -1 },
-    { (char *) "tm",        -1 },
-    { (char *) "ht",        -1 },
-    { (char *) "ss",        -1 },
+    { (char *) "ds",        -1 },
     { (char *) "acpi",      -1 },
-    { (char *) "ds",        -1 }
+    { (char *) "ss",        -1 },
+    { (char *) "ht",        -1 },
+    { (char *) "tm",        -1 },
+    { (char *) "pbe",       -1 },
+    { (char *) "ds_cpl",    -1 },
+    { (char *) "vmx",       -1 },
+    { (char *) "est",       -1 },
+    { (char *) "tm2",       -1 },
+    { (char *) "cx16",      -1 },
+    { (char *) "xtpr",      -1 },
+    { (char *) "lahf_lm",   -1 },
 };
 static virCPUDef cpuDefaultData = {
     VIR_CPU_TYPE_HOST,      /* type */
@@ -50,30 +51,30 @@ static virCPUDef cpuDefaultData = {
 };
 
 static virCPUFeatureDef cpuHaswellFeatures[] = {
-    { (char *) "lahf_lm",   -1 },
-    { (char *) "invtsc",    -1 },
-    { (char *) "abm",       -1 },
-    { (char *) "pdpe1gb",   -1 },
-    { (char *) "cmt",       -1 },
-    { (char *) "rdrand",    -1 },
-    { (char *) "f16c",      -1 },
-    { (char *) "osxsave",   -1 },
-    { (char *) "pdcm",      -1 },
-    { (char *) "xtpr",      -1 },
-    { (char *) "tm2",       -1 },
-    { (char *) "est",       -1 },
-    { (char *) "smx",       -1 },
-    { (char *) "vmx",       -1 },
-    { (char *) "ds_cpl",    -1 },
-    { (char *) "monitor",   -1 },
-    { (char *) "dtes64",    -1 },
-    { (char *) "pbe",       -1 },
-    { (char *) "tm",        -1 },
-    { (char *) "ht",        -1 },
-    { (char *) "ss",        -1 },
-    { (char *) "acpi",      -1 },
-    { (char *) "ds",        -1 },
     { (char *) "vme",       -1 },
+    { (char *) "ds",        -1 },
+    { (char *) "acpi",      -1 },
+    { (char *) "ss",        -1 },
+    { (char *) "ht",        -1 },
+    { (char *) "tm",        -1 },
+    { (char *) "pbe",       -1 },
+    { (char *) "dtes64",    -1 },
+    { (char *) "monitor",   -1 },
+    { (char *) "ds_cpl",    -1 },
+    { (char *) "vmx",       -1 },
+    { (char *) "smx",       -1 },
+    { (char *) "est",       -1 },
+    { (char *) "tm2",       -1 },
+    { (char *) "xtpr",      -1 },
+    { (char *) "pdcm",      -1 },
+    { (char *) "osxsave",   -1 },
+    { (char *) "f16c",      -1 },
+    { (char *) "rdrand",    -1 },
+    { (char *) "cmt",       -1 },
+    { (char *) "pdpe1gb",   -1 },
+    { (char *) "abm",       -1 },
+    { (char *) "invtsc",    -1 },
+    { (char *) "lahf_lm",   -1 },
 };
 static virCPUDef cpuHaswellData = {
     VIR_CPU_TYPE_HOST,      /* type */
@@ -90,6 +91,15 @@ static virCPUDef cpuHaswellData = {
     ARRAY_CARDINALITY(cpuHaswellFeatures), /* nfeatures */
     ARRAY_CARDINALITY(cpuHaswellFeatures), /* nfeatures_max */
     cpuHaswellFeatures,     /* features */
+};
+
+static virCPUDef cpuPower8Data = {
+    .type = VIR_CPU_TYPE_HOST,
+    .arch = VIR_ARCH_PPC64,
+    .model = (char *) "POWER8",
+    .sockets = 1,
+    .cores = 8,
+    .threads = 8,
 };
 
 static virCapsGuestMachinePtr *testQemuAllocMachines(int *nmachines)
@@ -331,10 +341,11 @@ virCapsPtr testQemuCapsInit(void)
         goto cleanup;
 
     if (!(cpuDefault = virCPUDefCopy(&cpuDefaultData)) ||
-        !(cpuHaswell = virCPUDefCopy(&cpuHaswellData)))
+        !(cpuHaswell = virCPUDefCopy(&cpuHaswellData)) ||
+        !(cpuPower8 = virCPUDefCopy(&cpuPower8Data)))
         goto cleanup;
 
-    caps->host.cpu = cpuDefault;
+    qemuTestSetHostCPU(caps, NULL);
 
     caps->host.nnumaCell_max = 4;
 
@@ -440,17 +451,48 @@ virCapsPtr testQemuCapsInit(void)
 
  cleanup:
     virCapabilitiesFreeMachines(machines, nmachines);
-    if (caps->host.cpu != cpuDefault)
-        virCPUDefFree(cpuDefault);
-    if (caps->host.cpu != cpuHaswell)
-        virCPUDefFree(cpuHaswell);
+    caps->host.cpu = NULL;
+    virCPUDefFree(cpuDefault);
+    virCPUDefFree(cpuHaswell);
+    virCPUDefFree(cpuPower8);
     virObjectUnref(caps);
     return NULL;
 }
 
 
+void
+qemuTestSetHostArch(virCapsPtr caps,
+                    virArch arch)
+{
+    if (arch == VIR_ARCH_NONE)
+        arch = VIR_ARCH_X86_64;
+    caps->host.arch = arch;
+    qemuTestSetHostCPU(caps, NULL);
+}
+
+
+void
+qemuTestSetHostCPU(virCapsPtr caps,
+                   virCPUDefPtr cpu)
+{
+    virArch arch = caps->host.arch;
+
+    if (!cpu) {
+        if (ARCH_IS_X86(arch))
+            cpu = cpuDefault;
+        else if (ARCH_IS_PPC64(arch))
+            cpu = cpuPower8;
+    }
+
+    if (cpu)
+        caps->host.arch = cpu->arch;
+    caps->host.cpu = cpu;
+}
+
+
 virQEMUCapsPtr
-qemuTestParseCapabilities(const char *capsFile)
+qemuTestParseCapabilities(virCapsPtr caps,
+                          const char *capsFile)
 {
     virQEMUCapsPtr qemuCaps = NULL;
     time_t qemuctime;
@@ -458,7 +500,7 @@ qemuTestParseCapabilities(const char *capsFile)
     unsigned long version;
 
     if (!(qemuCaps = virQEMUCapsNew()) ||
-        virQEMUCapsLoadCache(qemuCaps, capsFile,
+        virQEMUCapsLoadCache(caps, qemuCaps, capsFile,
                              &qemuctime, &selfctime, &version) < 0)
         goto error;
 

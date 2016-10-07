@@ -89,11 +89,11 @@ testCompareParseXML(const char *xlcfg, const char *xml, bool replaceVars)
         if (!(replacedXML = testReplaceVarsXML(xml)))
             goto fail;
         if (!(def = virDomainDefParseString(replacedXML, caps, xmlopt,
-                                            VIR_DOMAIN_XML_INACTIVE)))
+                                            NULL, VIR_DOMAIN_XML_INACTIVE)))
             goto fail;
     } else {
         if (!(def = virDomainDefParseFile(xml, caps, xmlopt,
-                                          VIR_DOMAIN_XML_INACTIVE)))
+                                          NULL, VIR_DOMAIN_XML_INACTIVE)))
             goto fail;
     }
 
@@ -268,6 +268,10 @@ mymain(void)
     DO_TEST_FORMAT("paravirt-cmdline-bogus-extra-root", false);
     DO_TEST("rbd-multihost-noauth");
 
+#ifdef LIBXL_HAVE_DEVICE_CHANNEL
+    DO_TEST("channel-pty");
+    DO_TEST("channel-unix");
+#endif
 #ifdef LIBXL_HAVE_BUILDINFO_SERIAL_LIST
     DO_TEST("fullvirt-multiserial");
 #endif

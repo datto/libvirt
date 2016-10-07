@@ -2,6 +2,7 @@
 <!-- A Relax NG schema for the libvirt domain capabilities XML format -->
 <grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
   <include href='basictypes.rng'/>
+  <include href='cputypes.rng'/>
   <start>
     <ref name='domainCapabilities'/>
   </start>
@@ -27,6 +28,9 @@
         </optional>
         <optional>
           <ref name='os'/>
+        </optional>
+        <optional>
+          <ref name='cpu'/>
         </optional>
         <optional>
           <ref name='devices'/>
@@ -65,6 +69,62 @@
           <ref name='loader'/>
         </optional>
       </interleave>
+    </element>
+  </define>
+
+  <define name='cpu'>
+    <element name='cpu'>
+      <ref name='cpuHost'/>
+      <ref name='cpuHostModel'/>
+      <ref name='cpuCustom'/>
+    </element>
+  </define>
+
+  <define name='cpuHost'>
+    <element name='mode'>
+      <attribute name='name'>
+        <value>host-passthrough</value>
+      </attribute>
+      <ref name='supported'/>
+    </element>
+  </define>
+
+  <define name='cpuHostModel'>
+    <element name='mode'>
+      <attribute name='name'>
+        <value>host-model</value>
+      </attribute>
+      <ref name='supported'/>
+      <optional>
+        <ref name="cpuModel"/>
+        <optional>
+          <ref name="cpuVendor"/>
+        </optional>
+        <zeroOrMore>
+          <ref name="cpuFeature"/>
+        </zeroOrMore>
+      </optional>
+    </element>
+  </define>
+
+  <define name='cpuCustom'>
+    <element name='mode'>
+      <attribute name='name'>
+        <value>custom</value>
+      </attribute>
+      <ref name='supported'/>
+      <zeroOrMore>
+        <element name='model'>
+          <attribute name='usable'>
+            <choice>
+              <value>yes</value>
+              <value>no</value>
+              <value>unknown</value>
+            </choice>
+          </attribute>
+          <text/>
+        </element>
+      </zeroOrMore>
     </element>
   </define>
 

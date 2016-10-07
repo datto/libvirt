@@ -569,7 +569,8 @@
         the order may be be duplicated accross all vcpus that need to be
         enabled at once. Specifying order is not necessary, vcpus are then
         added in an arbitrary order. If order info is used, it must be used for
-        all online vcpus.
+        all online vcpus. Hypervisors may clear or update ordering information
+        during certain operations to assure valid configuration.
 
         Note that hypervisors may create hotpluggable vcpus differently from
         boot vcpus thus special initialization may be necessary.
@@ -1703,7 +1704,7 @@
           <td>hidden</td>
           <td>Hide the KVM hypervisor from standard MSR based discovery</td>
           <td>on, off</td>
-          <td><span class="since">2.1.0 (QEMU only)</span></td>
+          <td><span class="since">1.2.8 (QEMU 2.1.0)</span></td>
         </tr>
       </table>
       </dd>
@@ -5979,6 +5980,16 @@ qemu-kvm -net nic,model=? /dev/null
         guest is active on the channel. This is an output-only attribute.
         Possible values for the <code>state</code> attribute are
         <code>connected</code> and <code>disconnected</code>.
+      </dd>
+      <dt><code>xen</code></dt>
+      <dd> Paravirtualized Xen channel. Channel is exposed in the guest as a
+        Xen console but identified with a name. Setup and consumption of a Xen
+        channel depends on software and configuration in the guest
+        (for more info, please see <a href="http://xenbits.xen.org/docs/unstable/misc/channel.txt">http://xenbits.xen.org/docs/unstable/misc/channel.txt</a>).
+        Channel source path semantics are the same as the virtio target type.
+        The <code>state</code> attribute is not supported since Xen channels
+        lack the necessary probing mechanism.
+        <span class="since">Since 2.3.0</span>
       </dd>
       <dt><code>spicevmc</code></dt>
       <dd>Paravirtualized SPICE channel. The domain must also have a

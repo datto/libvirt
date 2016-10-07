@@ -1751,7 +1751,7 @@ static virDomainPtr qemuDomainCreateXML(virConnectPtr conn,
         goto cleanup;
 
     if (!(def = virDomainDefParseString(xml, caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainCreateXMLEnsureACL(conn, def) < 0)
@@ -2833,14 +2833,6 @@ qemuDomainSaveHeader(int fd, const char *path, const char *xml,
     return ret;
 }
 
-/* Given a virQEMUSaveFormat compression level, return the name
- * of the program to run, or NULL if no program is needed.  */
-static const char *
-qemuCompressProgramName(int compress)
-{
-    return (compress == QEMU_SAVE_FORMAT_RAW ? NULL :
-            qemuSaveCompressionTypeToString(compress));
-}
 
 static virCommandPtr
 qemuCompressGetCommand(virQEMUSaveFormat compression)
@@ -3039,6 +3031,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
                      const char *path,
                      const char *domXML,
                      int compressed,
+                     const char *compressedpath,
                      bool was_running,
                      unsigned int flags,
                      qemuDomainAsyncJob asyncJob)
@@ -3086,8 +3079,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
         goto cleanup;
 
     /* Perform the migration */
-    if (qemuMigrationToFile(driver, vm, fd, qemuCompressProgramName(compressed),
-                            asyncJob) < 0)
+    if (qemuMigrationToFile(driver, vm, fd, compressedpath, asyncJob) < 0)
         goto cleanup;
 
     /* Touch up file header to mark image complete. */
@@ -3139,7 +3131,8 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
 static int
 qemuDomainSaveInternal(virQEMUDriverPtr driver, virDomainPtr dom,
                        virDomainObjPtr vm, const char *path,
-                       int compressed, const char *xmlin, unsigned int flags)
+                       int compressed, const char *compressedpath,
+                       const char *xmlin, unsigned int flags)
 {
     char *xml = NULL;
     bool was_running = false;
@@ -3192,7 +3185,7 @@ qemuDomainSaveInternal(virQEMUDriverPtr driver, virDomainPtr dom,
     if (xmlin) {
         virDomainDefPtr def = NULL;
 
-        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt,
+        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt, NULL,
                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                             VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE))) {
             goto endjob;
@@ -3212,7 +3205,8 @@ qemuDomainSaveInternal(virQEMUDriverPtr driver, virDomainPtr dom,
     }
 
     ret = qemuDomainSaveMemory(driver, vm, path, xml, compressed,
-                               was_running, flags, QEMU_ASYNC_JOB_SAVE);
+                               compressedpath, was_running, flags,
+                               QEMU_ASYNC_JOB_SAVE);
     if (ret < 0)
         goto endjob;
 
@@ -3250,28 +3244,86 @@ qemuDomainSaveInternal(virQEMUDriverPtr driver, virDomainPtr dom,
     return ret;
 }
 
-/* Returns true if a compression program is available in PATH */
-static bool
-qemuCompressProgramAvailable(virQEMUSaveFormat compress)
+
+/* qemuGetCompressionProgram:
+ * @imageFormat: String representation from qemu.conf for the compression
+ *               image format being used (dump, save, or snapshot).
+ * @compresspath: Pointer to a character string to store the fully qualified
+ *                path from virFindFileInPath.
+ * @styleFormat: String representing the style of format (dump, save, snapshot)
+ * @use_raw_on_fail: Boolean indicating how to handle the error path. For
+ *                   callers that are OK with invalid data or inability to
+ *                   find the compression program, just return a raw format
+ *                   and let the path remain as NULL.
+ *
+ * Returns:
+ *    virQEMUSaveFormat    - Integer representation of the compression
+ *                           program to be used for particular style
+ *                           (e.g. dump, save, or snapshot).
+ *    QEMU_SAVE_FORMAT_RAW - If there is no qemu.conf imageFormat value or
+ *                           no there was an error, then just return RAW
+ *                           indicating none.
+ */
+static int ATTRIBUTE_NONNULL(2)
+qemuGetCompressionProgram(const char *imageFormat,
+                          char **compresspath,
+                          const char *styleFormat,
+                          bool use_raw_on_fail)
 {
-    char *path;
+    int ret;
 
-    if (compress == QEMU_SAVE_FORMAT_RAW)
-        return true;
+    *compresspath = NULL;
 
-    if (!(path = virFindFileInPath(qemuSaveCompressionTypeToString(compress))))
-        return false;
+    if (!imageFormat)
+        return QEMU_SAVE_FORMAT_RAW;
 
-    VIR_FREE(path);
-    return true;
+    if ((ret = qemuSaveCompressionTypeFromString(imageFormat)) < 0)
+        goto error;
+
+    if (!(*compresspath = virFindFileInPath(imageFormat)))
+        goto error;
+
+    return ret;
+
+ error:
+    if (ret < 0) {
+        if (use_raw_on_fail)
+            VIR_WARN("Invalid %s image format specified in "
+                     "configuration file, using raw",
+                     styleFormat);
+        else
+            virReportError(VIR_ERR_OPERATION_FAILED,
+                           _("Invalid %s image format specified "
+                             "in configuration file"),
+                           styleFormat);
+    } else {
+        if (use_raw_on_fail)
+            VIR_WARN("Compression program for %s image format in "
+                     "configuration file isn't available, using raw",
+                     styleFormat);
+        else
+            virReportError(VIR_ERR_OPERATION_FAILED,
+                           _("Compression program for %s image format "
+                             "in configuration file isn't available"),
+                           styleFormat);
+    }
+
+    /* Use "raw" as the format if the specified format is not valid,
+     * or the compress program is not available. */
+    if (use_raw_on_fail)
+        return QEMU_SAVE_FORMAT_RAW;
+
+    return -1;
 }
+
 
 static int
 qemuDomainSaveFlags(virDomainPtr dom, const char *path, const char *dxml,
                     unsigned int flags)
 {
     virQEMUDriverPtr driver = dom->conn->privateData;
-    int compressed = QEMU_SAVE_FORMAT_RAW;
+    int compressed;
+    char *compressedpath = NULL;
     int ret = -1;
     virDomainObjPtr vm = NULL;
     virQEMUDriverConfigPtr cfg = NULL;
@@ -3281,21 +3333,10 @@ qemuDomainSaveFlags(virDomainPtr dom, const char *path, const char *dxml,
                   VIR_DOMAIN_SAVE_PAUSED, -1);
 
     cfg = virQEMUDriverGetConfig(driver);
-    if (cfg->saveImageFormat) {
-        compressed = qemuSaveCompressionTypeFromString(cfg->saveImageFormat);
-        if (compressed < 0) {
-            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                           _("Invalid save image format specified "
-                             "in configuration file"));
-            goto cleanup;
-        }
-        if (!qemuCompressProgramAvailable(compressed)) {
-            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                           _("Compression program for image format "
-                             "in configuration file isn't available"));
-            goto cleanup;
-        }
-    }
+    if ((compressed = qemuGetCompressionProgram(cfg->saveImageFormat,
+                                                &compressedpath,
+                                                "save", false)) < 0)
+        goto cleanup;
 
     if (!(vm = qemuDomObjFromDomain(dom)))
         goto cleanup;
@@ -3310,10 +3351,11 @@ qemuDomainSaveFlags(virDomainPtr dom, const char *path, const char *dxml,
     }
 
     ret = qemuDomainSaveInternal(driver, dom, vm, path, compressed,
-                                 dxml, flags);
+                                 compressedpath, dxml, flags);
 
  cleanup:
     virDomainObjEndAPI(&vm);
+    VIR_FREE(compressedpath);
     virObjectUnref(cfg);
     return ret;
 }
@@ -3344,7 +3386,8 @@ qemuDomainManagedSave(virDomainPtr dom, unsigned int flags)
 {
     virQEMUDriverPtr driver = dom->conn->privateData;
     virQEMUDriverConfigPtr cfg = NULL;
-    int compressed = QEMU_SAVE_FORMAT_RAW;
+    int compressed;
+    char *compressedpath = NULL;
     virDomainObjPtr vm;
     char *name = NULL;
     int ret = -1;
@@ -3371,35 +3414,25 @@ qemuDomainManagedSave(virDomainPtr dom, unsigned int flags)
     }
 
     cfg = virQEMUDriverGetConfig(driver);
-    if (cfg->saveImageFormat) {
-        compressed = qemuSaveCompressionTypeFromString(cfg->saveImageFormat);
-        if (compressed < 0) {
-            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                           _("Invalid save image format specified "
-                             "in configuration file"));
-            goto cleanup;
-        }
-        if (!qemuCompressProgramAvailable(compressed)) {
-            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                           _("Compression program for image format "
-                             "in configuration file isn't available"));
-            goto cleanup;
-        }
-    }
+    if ((compressed = qemuGetCompressionProgram(cfg->saveImageFormat,
+                                                &compressedpath,
+                                                "save", false)) < 0)
+        goto cleanup;
 
     if (!(name = qemuDomainManagedSavePath(driver, vm)))
         goto cleanup;
 
     VIR_INFO("Saving state of domain '%s' to '%s'", vm->def->name, name);
 
-    ret = qemuDomainSaveInternal(driver, dom, vm, name,
-                                 compressed, NULL, flags);
+    ret = qemuDomainSaveInternal(driver, dom, vm, name, compressed,
+                                 compressedpath, NULL, flags);
     if (ret == 0)
         vm->hasManagedSave = true;
 
  cleanup:
     virDomainObjEndAPI(&vm);
     VIR_FREE(name);
+    VIR_FREE(compressedpath);
     virObjectUnref(cfg);
 
     return ret;
@@ -3532,7 +3565,6 @@ static int
 doCoreDump(virQEMUDriverPtr driver,
            virDomainObjPtr vm,
            const char *path,
-           virQEMUSaveFormat compress,
            unsigned int dump_flags,
            unsigned int dumpformat)
 {
@@ -3542,6 +3574,16 @@ doCoreDump(virQEMUDriverPtr driver,
     int directFlag = 0;
     unsigned int flags = VIR_FILE_WRAPPER_NON_BLOCKING;
     const char *memory_dump_format = NULL;
+    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+    char *compressedpath = NULL;
+
+    /* We reuse "save" flag for "dump" here. Then, we can support the same
+     * format in "save" and "dump". This path doesn't need the compression
+     * program to exist and can ignore the return value - it only cares to
+     * get the compressedpath */
+    ignore_value(qemuGetCompressionProgram(cfg->dumpImageFormat,
+                                           &compressedpath,
+                                           "dump", true));
 
     /* Create an empty file with appropriate ownership.  */
     if (dump_flags & VIR_DUMP_BYPASS_CACHE) {
@@ -3588,8 +3630,7 @@ doCoreDump(virQEMUDriverPtr driver,
         if (!qemuMigrationIsAllowed(driver, vm, false, 0))
             goto cleanup;
 
-        ret = qemuMigrationToFile(driver, vm, fd,
-                                  qemuCompressProgramName(compress),
+        ret = qemuMigrationToFile(driver, vm, fd, compressedpath,
                                   QEMU_ASYNC_JOB_DUMP);
     }
 
@@ -3612,39 +3653,7 @@ doCoreDump(virQEMUDriverPtr driver,
     if (ret != 0)
         unlink(path);
     virFileWrapperFdFree(wrapperFd);
-    return ret;
-}
-
-static virQEMUSaveFormat
-getCompressionType(virQEMUDriverPtr driver)
-{
-    int ret = QEMU_SAVE_FORMAT_RAW;
-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
-
-    /*
-     * We reuse "save" flag for "dump" here. Then, we can support the same
-     * format in "save" and "dump".
-     */
-    if (cfg->dumpImageFormat) {
-        ret = qemuSaveCompressionTypeFromString(cfg->dumpImageFormat);
-        /* Use "raw" as the format if the specified format is not valid,
-         * or the compress program is not available.
-         */
-        if (ret < 0) {
-            VIR_WARN("%s", _("Invalid dump image format specified in "
-                             "configuration file, using raw"));
-            ret = QEMU_SAVE_FORMAT_RAW;
-            goto cleanup;
-        }
-        if (!qemuCompressProgramAvailable(ret)) {
-            VIR_WARN("%s", _("Compression program for dump image format "
-                             "in configuration file isn't available, "
-                             "using raw"));
-            ret = QEMU_SAVE_FORMAT_RAW;
-            goto cleanup;
-        }
-    }
- cleanup:
+    VIR_FREE(compressedpath);
     virObjectUnref(cfg);
     return ret;
 }
@@ -3702,9 +3711,7 @@ qemuDomainCoreDumpWithFormat(virDomainPtr dom,
         }
     }
 
-    ret = doCoreDump(driver, vm, path, getCompressionType(driver), flags,
-                     dumpformat);
-    if (ret < 0)
+    if ((ret = doCoreDump(driver, vm, path, flags, dumpformat)) < 0)
         goto endjob;
 
     paused = true;
@@ -3909,10 +3916,8 @@ processWatchdogEvent(virQEMUDriverPtr driver,
         }
 
         flags |= cfg->autoDumpBypassCache ? VIR_DUMP_BYPASS_CACHE: 0;
-        ret = doCoreDump(driver, vm, dumpfile,
-                         getCompressionType(driver), flags,
-                         VIR_DOMAIN_CORE_DUMP_FORMAT_RAW);
-        if (ret < 0)
+        if ((ret = doCoreDump(driver, vm, dumpfile, flags,
+                              VIR_DOMAIN_CORE_DUMP_FORMAT_RAW)) < 0)
             virReportError(VIR_ERR_OPERATION_FAILED,
                            "%s", _("Dump failed"));
 
@@ -3949,10 +3954,8 @@ doCoreDumpToAutoDumpPath(virQEMUDriverPtr driver,
         goto cleanup;
 
     flags |= cfg->autoDumpBypassCache ? VIR_DUMP_BYPASS_CACHE: 0;
-    ret = doCoreDump(driver, vm, dumpfile,
-                     getCompressionType(driver), flags,
-                     VIR_DOMAIN_CORE_DUMP_FORMAT_RAW);
-    if (ret < 0)
+    if ((ret = doCoreDump(driver, vm, dumpfile, flags,
+                          VIR_DOMAIN_CORE_DUMP_FORMAT_RAW)) < 0)
         virReportError(VIR_ERR_OPERATION_FAILED,
                        "%s", _("Dump failed"));
  cleanup:
@@ -4742,6 +4745,9 @@ qemuDomainSetVcpusMax(virQEMUDriverPtr driver,
         }
     }
 
+    /* ordering information may become invalid, thus clear it */
+    virDomainDefVcpuOrderClear(persistentDef);
+
     if (virDomainDefSetVcpusMax(persistentDef, nvcpus, driver->xmlopt) < 0)
         goto cleanup;
 
@@ -4898,12 +4904,73 @@ qemuDomainSetVcpusLive(virQEMUDriverPtr driver,
 }
 
 
+/**
+ * qemuDomainSetVcpusConfig:
+ * @def: config/offline definition of a domain
+ * @nvcpus: target vcpu count
+ *
+ * Properly handle cold(un)plug of vcpus:
+ * - plug in inactive vcpus/uplug active rather than rewriting state
+ * - fix hotpluggable state
+ */
+static void
+qemuDomainSetVcpusConfig(virDomainDefPtr def,
+                         unsigned int nvcpus,
+                         bool hotpluggable)
+{
+    virDomainVcpuDefPtr vcpu;
+    size_t curvcpus = virDomainDefGetVcpus(def);
+    size_t maxvcpus = virDomainDefGetVcpusMax(def);
+    size_t i;
+
+    /* ordering information may become invalid, thus clear it */
+    virDomainDefVcpuOrderClear(def);
+
+    if (curvcpus == nvcpus)
+        return;
+
+    if (curvcpus < nvcpus) {
+        for (i = 0; i < maxvcpus; i++) {
+            vcpu = virDomainDefGetVcpu(def, i);
+
+            if (!vcpu || vcpu->online)
+                continue;
+
+            vcpu->online = true;
+            if (hotpluggable) {
+                vcpu->hotpluggable = VIR_TRISTATE_BOOL_YES;
+                def->individualvcpus = true;
+            } else {
+                vcpu->hotpluggable = VIR_TRISTATE_BOOL_NO;
+            }
+
+            if (++curvcpus == nvcpus)
+                break;
+        }
+    } else {
+        for (i = maxvcpus; i != 0; i--) {
+            vcpu = virDomainDefGetVcpu(def, i - 1);
+
+            if (!vcpu || !vcpu->online)
+                continue;
+
+            vcpu->online = false;
+            vcpu->hotpluggable = VIR_TRISTATE_BOOL_YES;
+
+            if (--curvcpus == nvcpus)
+                break;
+        }
+    }
+}
+
+
 static int
 qemuDomainSetVcpusInternal(virQEMUDriverPtr driver,
                            virDomainObjPtr vm,
                            virDomainDefPtr def,
                            virDomainDefPtr persistentDef,
-                           unsigned int nvcpus)
+                           unsigned int nvcpus,
+                           bool hotpluggable)
 {
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     int ret = -1;
@@ -4928,8 +4995,7 @@ qemuDomainSetVcpusInternal(virQEMUDriverPtr driver,
         goto cleanup;
 
     if (persistentDef) {
-        if (virDomainDefSetVcpus(persistentDef, nvcpus) < 0)
-            goto cleanup;
+        qemuDomainSetVcpusConfig(persistentDef, nvcpus, hotpluggable);
 
         if (virDomainSaveConfig(cfg->configDir, driver->caps, persistentDef) < 0)
             goto cleanup;
@@ -4952,12 +5018,14 @@ qemuDomainSetVcpusFlags(virDomainPtr dom,
     virDomainObjPtr vm = NULL;
     virDomainDefPtr def;
     virDomainDefPtr persistentDef;
+    bool hotpluggable = !!(flags & VIR_DOMAIN_VCPU_HOTPLUGGABLE);
     int ret = -1;
 
     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
                   VIR_DOMAIN_AFFECT_CONFIG |
                   VIR_DOMAIN_VCPU_MAXIMUM |
-                  VIR_DOMAIN_VCPU_GUEST, -1);
+                  VIR_DOMAIN_VCPU_GUEST |
+                  VIR_DOMAIN_VCPU_HOTPLUGGABLE, -1);
 
     if (!(vm = qemuDomObjFromDomain(dom)))
         goto cleanup;
@@ -4976,7 +5044,8 @@ qemuDomainSetVcpusFlags(virDomainPtr dom,
     else if (flags & VIR_DOMAIN_VCPU_MAXIMUM)
         ret = qemuDomainSetVcpusMax(driver, def, persistentDef, nvcpus);
     else
-        ret = qemuDomainSetVcpusInternal(driver, vm, def, persistentDef, nvcpus);
+        ret = qemuDomainSetVcpusInternal(driver, vm, def, persistentDef,
+                                         nvcpus, hotpluggable);
 
  endjob:
     qemuDomainObjEndJob(driver, vm);
@@ -5171,8 +5240,9 @@ qemuDomainGetVcpuPinInfo(virDomainPtr dom,
 {
     virDomainObjPtr vm = NULL;
     virDomainDefPtr def;
+    bool live;
     int ret = -1;
-    qemuDomainObjPrivatePtr priv = NULL;
+    virBitmapPtr autoCpuset = NULL;
 
     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
                   VIR_DOMAIN_AFFECT_CONFIG, -1);
@@ -5183,14 +5253,14 @@ qemuDomainGetVcpuPinInfo(virDomainPtr dom,
     if (virDomainGetVcpuPinInfoEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (!(def = virDomainObjGetOneDef(vm, flags)))
+    if (!(def = virDomainObjGetOneDefState(vm, flags, &live)))
         goto cleanup;
 
-    priv = vm->privateData;
+    if (live)
+        autoCpuset = QEMU_DOMAIN_PRIVATE(vm)->autoCpuset;
 
     ret = virDomainDefGetVcpuPinInfoHelper(def, maplen, ncpumaps, cpumaps,
-                                           virHostCPUGetCount(),
-                                           priv->autoCpuset);
+                                           virHostCPUGetCount(), autoCpuset);
  cleanup:
     virDomainObjEndAPI(&vm);
     return ret;
@@ -5316,11 +5386,12 @@ qemuDomainGetEmulatorPinInfo(virDomainPtr dom,
 {
     virDomainObjPtr vm = NULL;
     virDomainDefPtr def;
+    bool live;
     int ret = -1;
     int hostcpus;
     virBitmapPtr cpumask = NULL;
     virBitmapPtr bitmap = NULL;
-    qemuDomainObjPrivatePtr priv = NULL;
+    virBitmapPtr autoCpuset = NULL;
 
     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
                   VIR_DOMAIN_AFFECT_CONFIG, -1);
@@ -5331,21 +5402,22 @@ qemuDomainGetEmulatorPinInfo(virDomainPtr dom,
     if (virDomainGetEmulatorPinInfoEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (!(def = virDomainObjGetOneDef(vm, flags)))
+    if (!(def = virDomainObjGetOneDefState(vm, flags, &live)))
         goto cleanup;
 
     if ((hostcpus = virHostCPUGetCount()) < 0)
         goto cleanup;
 
-    priv = vm->privateData;
+    if (live)
+        autoCpuset = QEMU_DOMAIN_PRIVATE(vm)->autoCpuset;
 
     if (def->cputune.emulatorpin) {
         cpumask = def->cputune.emulatorpin;
     } else if (def->cpumask) {
         cpumask = def->cpumask;
     } else if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO &&
-               priv->autoCpuset) {
-        cpumask = priv->autoCpuset;
+               autoCpuset) {
+        cpumask = autoCpuset;
     } else {
         if (!(bitmap = virBitmapNew(hostcpus)))
             goto cleanup;
@@ -6300,7 +6372,7 @@ qemuDomainSaveImageUpdateDef(virQEMUDriverPtr driver,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
-    if (!(newdef = virDomainDefParseString(newxml, caps, driver->xmlopt,
+    if (!(newdef = virDomainDefParseString(newxml, caps, driver->xmlopt, NULL,
                                            VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
 
@@ -6456,7 +6528,7 @@ qemuDomainSaveImageOpen(virQEMUDriverPtr driver,
     }
 
     /* Create a domain from this XML */
-    if (!(def = virDomainDefParseString(xml, caps, driver->xmlopt,
+    if (!(def = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
         goto error;
@@ -7008,7 +7080,7 @@ static char *qemuConnectDomainXMLToNative(virConnectPtr conn,
     if (!(vm = virDomainObjNew(driver->xmlopt)))
         goto cleanup;
 
-    if (!(vm->def = virDomainDefParseString(xmlData, caps, driver->xmlopt,
+    if (!(vm->def = virDomainDefParseString(xmlData, caps, driver->xmlopt, NULL,
                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                             VIR_DOMAIN_DEF_PARSE_ABI_UPDATE)))
         goto cleanup;
@@ -7246,7 +7318,7 @@ qemuDomainDefineXMLFlags(virConnectPtr conn,
         goto cleanup;
 
     if (!(def = virDomainDefParseString(xml, caps, driver->xmlopt,
-                                        parse_flags)))
+                                        NULL, parse_flags)))
         goto cleanup;
 
     if (virDomainDefineXMLFlagsEnsureACL(conn, def) < 0)
@@ -7914,7 +7986,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
          return -1;
     }
 
-    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt) < 0)
+    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt, NULL) < 0)
         return -1;
 
     return 0;
@@ -8071,7 +8143,7 @@ qemuDomainDetachDeviceConfig(virDomainDefPtr vmdef,
         return -1;
     }
 
-    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt) < 0)
+    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt, NULL) < 0)
         return -1;
 
     return 0;
@@ -8084,35 +8156,23 @@ qemuDomainUpdateDeviceConfig(virDomainDefPtr vmdef,
                              unsigned int parse_flags,
                              virDomainXMLOptionPtr xmlopt)
 {
-    virDomainDiskDefPtr orig, disk;
+    virDomainDiskDefPtr newDisk;
     virDomainGraphicsDefPtr newGraphics;
     virDomainNetDefPtr net;
     int pos;
 
     switch ((virDomainDeviceType) dev->type) {
     case VIR_DOMAIN_DEVICE_DISK:
-        disk = dev->data.disk;
-        if (!(orig = virDomainDiskByName(vmdef, disk->dst, false))) {
+        newDisk = dev->data.disk;
+        if ((pos = virDomainDiskIndexByName(vmdef, newDisk->dst, false)) < 0) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("target %s doesn't exist."), disk->dst);
+                           _("target %s doesn't exist."), newDisk->dst);
             return -1;
         }
-        if (!(orig->device == VIR_DOMAIN_DISK_DEVICE_CDROM) &&
-            !(orig->device == VIR_DOMAIN_DISK_DEVICE_FLOPPY)) {
-            virReportError(VIR_ERR_INVALID_ARG, "%s",
-                           _("this disk doesn't support update"));
-            return -1;
-        }
-        /*
-         * Update 'orig'
-         * We allow updating src/type//driverType/cachemode/
-         */
-        orig->cachemode = disk->cachemode;
-        orig->startupPolicy = disk->startupPolicy;
 
-        virStorageSourceFree(orig->src);
-        orig->src = disk->src;
-        disk->src = NULL;
+        virDomainDiskDefFree(vmdef->disks[pos]);
+        vmdef->disks[pos] = newDisk;
+        dev->data.disk = NULL;
         break;
 
     case VIR_DOMAIN_DEVICE_GRAPHICS:
@@ -8170,7 +8230,7 @@ qemuDomainUpdateDeviceConfig(virDomainDefPtr vmdef,
         return -1;
     }
 
-    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt) < 0)
+    if (virDomainDefPostParse(vmdef, caps, parse_flags, xmlopt, NULL) < 0)
         return -1;
 
     return 0;
@@ -8373,7 +8433,8 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
 
     if (priv->qemuCaps)
         qemuCaps = virObjectRef(priv->qemuCaps);
-    else if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache, vm->def->emulator)))
+    else if (!(qemuCaps = virQEMUCapsCacheLookup(caps, driver->qemuCapsCache,
+                                                 vm->def->emulator)))
         goto endjob;
 
     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
@@ -12808,18 +12869,8 @@ qemuConnectCompareCPU(virConnectPtr conn,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
-    if (!caps->host.cpu ||
-        !caps->host.cpu->model) {
-        if (failIncompatible) {
-            virReportError(VIR_ERR_CPU_INCOMPATIBLE, "%s",
-                           _("cannot get host CPU capabilities"));
-        } else {
-            VIR_WARN("cannot get host CPU capabilities");
-            ret = VIR_CPU_COMPARE_INCOMPATIBLE;
-        }
-    } else {
-        ret = cpuCompareXML(caps->host.cpu, xmlDesc, failIncompatible);
-    }
+    ret = virCPUCompareXML(caps->host.arch, caps->host.cpu,
+                           xmlDesc, failIncompatible);
 
  cleanup:
     virObjectUnref(caps);
@@ -14305,7 +14356,8 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
     int thaw = 0; /* 1 if freeze succeeded, -1 if freeze failed */
     bool pmsuspended = false;
     virQEMUDriverConfigPtr cfg = NULL;
-    int compressed = QEMU_SAVE_FORMAT_RAW;
+    int compressed;
+    char *compressedpath = NULL;
 
     /* If quiesce was requested, then issue a freeze command, and a
      * counterpart thaw command when it is actually sent to agent.
@@ -14366,29 +14418,17 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
                                           JOB_MASK(QEMU_JOB_MIGRATION_OP)));
 
         cfg = virQEMUDriverGetConfig(driver);
-        if (cfg->snapshotImageFormat) {
-            compressed = qemuSaveCompressionTypeFromString(cfg->snapshotImageFormat);
-            if (compressed < 0) {
-                virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                               _("Invalid snapshot image format specified "
-                                 "in configuration file"));
-                goto cleanup;
-            }
-
-            if (!qemuCompressProgramAvailable(compressed)) {
-                virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                               _("Compression program for image format "
-                                 "in configuration file isn't available"));
-                goto cleanup;
-            }
-        }
+        if ((compressed = qemuGetCompressionProgram(cfg->snapshotImageFormat,
+                                                    &compressedpath,
+                                                    "snapshot", false)) < 0)
+            goto cleanup;
 
         if (!(xml = qemuDomainDefFormatLive(driver, vm->def, true, true)))
             goto cleanup;
 
-        if ((ret = qemuDomainSaveMemory(driver, vm, snap->def->file,
-                                        xml, compressed, resume, 0,
-                                        QEMU_ASYNC_JOB_SNAPSHOT)) < 0)
+        if ((ret = qemuDomainSaveMemory(driver, vm, snap->def->file, xml,
+                                        compressed, compressedpath, resume,
+                                        0, QEMU_ASYNC_JOB_SNAPSHOT)) < 0)
             goto cleanup;
 
         /* the memory image was created, remove it on errors */
@@ -14457,6 +14497,7 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
     }
 
     VIR_FREE(xml);
+    VIR_FREE(compressedpath);
     virObjectUnref(cfg);
     if (memory_unlink && ret < 0)
         unlink(snap->def->file);
@@ -14609,7 +14650,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
         /* Easiest way to clone inactive portion of vm->def is via
          * conversion in and back out of xml.  */
         if (!(xml = qemuDomainDefFormatLive(driver, vm->def, true, true)) ||
-            !(def->dom = virDomainDefParseString(xml, caps, driver->xmlopt,
+            !(def->dom = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
                                                  VIR_DOMAIN_DEF_PARSE_INACTIVE |
                                                  VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
             goto endjob;
@@ -15245,7 +15286,8 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
      * than inactive xml?  */
     snap->def->current = true;
     if (snap->def->dom) {
-        config = virDomainDefCopy(snap->def->dom, caps, driver->xmlopt, true);
+        config = virDomainDefCopy(snap->def->dom, caps,
+                                  driver->xmlopt, NULL, true);
         if (!config)
             goto endjob;
     }
@@ -15742,7 +15784,8 @@ static virDomainPtr qemuDomainQemuAttach(virConnectPtr conn,
         virAsprintf(&def->name, "attach-pid-%u", pid_value) < 0)
         goto cleanup;
 
-    if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache, def->emulator)))
+    if (!(qemuCaps = virQEMUCapsCacheLookup(caps, driver->qemuCapsCache,
+                                            def->emulator)))
         goto cleanup;
 
     if (qemuAssignDeviceAliases(def, qemuCaps) < 0)
@@ -16310,6 +16353,46 @@ qemuDomainBlockJobAbort(virDomainPtr dom,
 
 
 static int
+qemuBlockJobInfoTranslate(qemuMonitorBlockJobInfoPtr rawInfo,
+                          virDomainBlockJobInfoPtr info,
+                          virDomainDiskDefPtr disk,
+                          bool reportBytes)
+{
+    info->cur = rawInfo->cur;
+    info->end = rawInfo->end;
+
+    /* Fix job completeness reporting. If cur == end mgmt
+     * applications think job is completed. Except when both cur
+     * and end are zero, in which case qemu hasn't started the
+     * job yet. */
+    if (!info->cur && !info->end) {
+        if (rawInfo->ready > 0) {
+            info->cur = info->end = 1;
+        } else if (!rawInfo->ready) {
+            info->end = 1;
+        }
+    }
+
+    info->type = rawInfo->type;
+    if (info->type == VIR_DOMAIN_BLOCK_JOB_TYPE_COMMIT &&
+        disk->mirrorJob == VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT)
+        info->type = disk->mirrorJob;
+
+    if (rawInfo->bandwidth && !reportBytes)
+        rawInfo->bandwidth = VIR_DIV_UP(rawInfo->bandwidth, 1024 * 1024);
+    info->bandwidth = rawInfo->bandwidth;
+    if (info->bandwidth != rawInfo->bandwidth) {
+        virReportError(VIR_ERR_OVERFLOW,
+                       _("bandwidth %llu cannot be represented in result"),
+                       rawInfo->bandwidth);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int
 qemuDomainGetBlockJobInfo(virDomainPtr dom,
                           const char *path,
                           virDomainBlockJobInfoPtr info,
@@ -16356,22 +16439,8 @@ qemuDomainGetBlockJobInfo(virDomainPtr dom,
     if (ret <= 0)
         goto endjob;
 
-    info->cur = rawInfo.cur;
-    info->end = rawInfo.end;
-
-    info->type = rawInfo.type;
-    if (info->type == VIR_DOMAIN_BLOCK_JOB_TYPE_COMMIT &&
-        disk->mirrorJob == VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT)
-        info->type = disk->mirrorJob;
-
-    if (rawInfo.bandwidth &&
-        !(flags & VIR_DOMAIN_BLOCK_JOB_INFO_BANDWIDTH_BYTES))
-        rawInfo.bandwidth = VIR_DIV_UP(rawInfo.bandwidth, 1024 * 1024);
-    info->bandwidth = rawInfo.bandwidth;
-    if (info->bandwidth != rawInfo.bandwidth) {
-        virReportError(VIR_ERR_OVERFLOW,
-                       _("bandwidth %llu cannot be represented in result"),
-                       rawInfo.bandwidth);
+    if (qemuBlockJobInfoTranslate(&rawInfo, info, disk,
+                                  flags & VIR_DOMAIN_BLOCK_JOB_INFO_BANDWIDTH_BYTES) < 0) {
         ret = -1;
         goto endjob;
     }
@@ -17092,10 +17161,13 @@ qemuDomainOpenGraphics(virDomainPtr dom,
     if (virDomainOpenGraphicsEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
+    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
+        goto cleanup;
+
     if (!virDomainObjIsActive(vm)) {
         virReportError(VIR_ERR_OPERATION_INVALID,
                        "%s", _("domain is not running"));
-        goto cleanup;
+        goto endjob;
     }
 
     priv = vm->privateData;
@@ -17103,7 +17175,7 @@ qemuDomainOpenGraphics(virDomainPtr dom,
     if (idx >= vm->def->ngraphics) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("No graphics backend with index %d"), idx);
-        goto cleanup;
+        goto endjob;
     }
     switch (vm->def->graphics[idx]->type) {
     case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
@@ -17116,20 +17188,20 @@ qemuDomainOpenGraphics(virDomainPtr dom,
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("Can only open VNC or SPICE graphics backends, not %s"),
                        virDomainGraphicsTypeToString(vm->def->graphics[idx]->type));
-        goto cleanup;
+        goto endjob;
     }
 
     if (virSecurityManagerSetImageFDLabel(driver->securityManager, vm->def,
                                           fd) < 0)
-        goto cleanup;
+        goto endjob;
 
-    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
-        goto cleanup;
     qemuDomainObjEnterMonitor(driver, vm);
     ret = qemuMonitorOpenGraphics(priv->mon, protocol, fd, "graphicsfd",
                                   (flags & VIR_DOMAIN_OPEN_GRAPHICS_SKIPAUTH) != 0);
     if (qemuDomainObjExitMonitor(driver, vm) < 0)
         ret = -1;
+
+ endjob:
     qemuDomainObjEndJob(driver, vm);
 
  cleanup:
@@ -18337,13 +18409,22 @@ qemuNodeSuspendForDuration(virConnectPtr conn,
 
 static int
 qemuConnectGetCPUModelNames(virConnectPtr conn,
-                            const char *arch,
+                            const char *archName,
                             char ***models,
                             unsigned int flags)
 {
+    virArch arch;
+
     virCheckFlags(0, -1);
     if (virConnectGetCPUModelNamesEnsureACL(conn) < 0)
         return -1;
+
+    if (!(arch = virArchFromString(archName))) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("cannot find architecture %s"),
+                       archName);
+        return -1;
+    }
 
     return cpuGetModels(arch, models);
 }
@@ -18596,6 +18677,7 @@ qemuConnectGetDomainCapabilities(virConnectPtr conn,
     virDomainCapsPtr domCaps = NULL;
     int arch = virArchFromHost(); /* virArch */
     virQEMUDriverConfigPtr cfg = NULL;
+    virCapsPtr caps = NULL;
 
     virCheckFlags(0, ret);
 
@@ -18603,6 +18685,9 @@ qemuConnectGetDomainCapabilities(virConnectPtr conn,
         return ret;
 
     cfg = virQEMUDriverGetConfig(driver);
+
+    if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+        goto cleanup;
 
     if (qemuHostdevHostSupportsPassthroughLegacy() ||
         qemuHostdevHostSupportsPassthroughVFIO())
@@ -18628,7 +18713,8 @@ qemuConnectGetDomainCapabilities(virConnectPtr conn,
     if (emulatorbin) {
         virArch arch_from_caps;
 
-        if (!(qemuCaps = virQEMUCapsCacheLookup(driver->qemuCapsCache,
+        if (!(qemuCaps = virQEMUCapsCacheLookup(caps,
+                                                driver->qemuCapsCache,
                                                 emulatorbin)))
             goto cleanup;
 
@@ -18675,13 +18761,14 @@ qemuConnectGetDomainCapabilities(virConnectPtr conn,
     if (!(domCaps = virDomainCapsNew(emulatorbin, machine, arch, virttype)))
         goto cleanup;
 
-    if (virQEMUCapsFillDomainCaps(domCaps, qemuCaps,
+    if (virQEMUCapsFillDomainCaps(caps, domCaps, qemuCaps,
                                   cfg->firmwares, cfg->nfirmwares) < 0)
         goto cleanup;
 
     ret = virDomainCapsFormat(domCaps);
  cleanup:
     virObjectUnref(cfg);
+    virObjectUnref(caps);
     virObjectUnref(domCaps);
     virObjectUnref(qemuCaps);
     return ret;

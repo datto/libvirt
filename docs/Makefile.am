@@ -16,11 +16,6 @@
 ## License along with this library.  If not, see
 ## <http://www.gnu.org/licenses/>.
 
-PERL = perl
-
-# The directory containing the source code (if it contains documentation).
-DOC_SOURCE_DIR=../src
-
 DEVHELP_DIR=$(datadir)/gtk-doc/html/libvirt
 
 apihtml =					\
@@ -101,9 +96,11 @@ internals_html = $(internals_html_in:%.html.in=%.html)
 # For all other files, since we ship pre-built html in the
 # tarball, we must also ship the sources, even when those
 # sources are themselves generated.
-dot_html_in = $(notdir $(wildcard $(srcdir)/*.html.in)) \
+# Generate hvsupport.html first, since it takes one extra step.
+dot_html_in = \
+  hvsupport.html.in \
   todo.html.in \
-  hvsupport.html.in
+  $(notdir $(wildcard $(srcdir)/*.html.in))
 dot_html = $(dot_html_in:%.html.in=%.html)
 
 dot_php_in = $(notdir $(wildcard $(srcdir)/*.php.in))

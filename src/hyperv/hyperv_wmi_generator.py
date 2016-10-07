@@ -70,7 +70,7 @@ class Class:
         header += "\n"
         header += "#define %s_RESOURCE_URI \\\n" % name_upper
 
-        if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
+        if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/%s\"\n" % self.name
         elif self.name.endswith("_2012"):
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/%s\"\n" % class_name
@@ -139,7 +139,7 @@ class Class:
                   % (self.name.replace("_", ""), self.name)
         source += "{\n"
 
-        if self.name.startswith("Win32_") or self.name.startswith("CIM_DataFile"):
+        if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
             source += "    return hypervEnumAndPull(priv, query, ROOT_CIMV2,\n"
         elif self.name.endswith("_2012"):
             source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION_V2,\n"

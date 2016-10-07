@@ -634,12 +634,23 @@ ppc64Compute(virCPUDefPtr host,
 }
 
 static virCPUCompareResult
-ppc64DriverCompare(virCPUDefPtr host,
+virCPUppc64Compare(virCPUDefPtr host,
                    virCPUDefPtr cpu,
                    bool failIncompatible)
 {
     virCPUCompareResult ret;
     char *message = NULL;
+
+    if (!host || !host->model) {
+        if (failIncompatible) {
+            virReportError(VIR_ERR_CPU_INCOMPATIBLE, "%s",
+                           _("unknown host CPU"));
+        } else {
+            VIR_WARN("unknown host CPU");
+            ret = VIR_CPU_COMPARE_INCOMPATIBLE;
+        }
+        return -1;
+    }
 
     ret = ppc64Compute(host, cpu, NULL, &message);
 
@@ -751,27 +762,21 @@ ppc64DriverGuestData(virCPUDefPtr host,
 }
 
 static int
-ppc64DriverUpdate(virCPUDefPtr guest,
-                  const virCPUDef *host)
+virCPUppc64Update(virCPUDefPtr guest,
+                  const virCPUDef *host ATTRIBUTE_UNUSED)
 {
-    switch ((virCPUMode) guest->mode) {
-    case VIR_CPU_MODE_HOST_PASSTHROUGH:
+    /*
+     * - host-passthrough doesn't even get here
+     * - host-model is used for host CPU running in a compatibility mode and
+     *   it needs to remain unchanged
+     * - custom doesn't support any optional features, there's nothing to
+     *   update
+     */
+
+    if (guest->mode == VIR_CPU_MODE_CUSTOM)
         guest->match = VIR_CPU_MATCH_EXACT;
-        guest->fallback = VIR_CPU_FALLBACK_FORBID;
-        virCPUDefFreeModel(guest);
-        return virCPUDefCopyModel(guest, host, true);
 
-    case VIR_CPU_MODE_HOST_MODEL:
-    case VIR_CPU_MODE_CUSTOM:
-        return 0;
-
-    case VIR_CPU_MODE_LAST:
-        break;
-    }
-
-    virReportError(VIR_ERR_INTERNAL_ERROR,
-                   _("Unexpected CPU mode: %d"), guest->mode);
-    return -1;
+    return 0;
 }
 
 static virCPUDefPtr
@@ -908,14 +913,13 @@ struct cpuArchDriver cpuDriverPPC64 = {
     .name       = "ppc64",
     .arch       = archs,
     .narch      = ARRAY_CARDINALITY(archs),
-    .compare    = ppc64DriverCompare,
+    .compare    = virCPUppc64Compare,
     .decode     = ppc64DriverDecode,
     .encode     = NULL,
     .free       = ppc64DriverFree,
     .nodeData   = ppc64DriverNodeData,
     .guestData  = ppc64DriverGuestData,
     .baseline   = ppc64DriverBaseline,
-    .update     = ppc64DriverUpdate,
-    .hasFeature = NULL,
+    .update     = virCPUppc64Update,
     .getModels  = ppc64DriverGetModels,
 };

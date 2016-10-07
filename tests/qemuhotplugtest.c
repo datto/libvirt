@@ -84,6 +84,7 @@ qemuHotplugCreateObjects(virDomainXMLOptionPtr xmlopt,
     if (!((*vm)->def = virDomainDefParseString(domxml,
                                                driver.caps,
                                                driver.xmlopt,
+                                               NULL,
                                                VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
 
@@ -240,7 +241,7 @@ testQemuHotplug(const void *data)
         virTestLoadFile(device_filename, &device_xml) < 0)
         goto cleanup;
 
-    if (test->action != UPDATE &&
+    if (test->action == ATTACH &&
         virTestLoadFile(result_filename, &result_xml) < 0)
         goto cleanup;
 

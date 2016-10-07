@@ -263,7 +263,8 @@ static int
 vzDomainDefPostParse(virDomainDefPtr def,
                      virCapsPtr caps ATTRIBUTE_UNUSED,
                      unsigned int parseFlags ATTRIBUTE_UNUSED,
-                     void *opaque ATTRIBUTE_UNUSED)
+                     void *opaque ATTRIBUTE_UNUSED,
+                     void *parseOpaque ATTRIBUTE_UNUSED)
 {
     if (vzDomainDefAddDefaultInputDevices(def) < 0)
         return -1;
@@ -287,7 +288,8 @@ vzDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
                            const virDomainDef *def,
                            virCapsPtr caps ATTRIBUTE_UNUSED,
                            unsigned int parseFlags ATTRIBUTE_UNUSED,
-                           void *opaque ATTRIBUTE_UNUSED)
+                           void *opaque ATTRIBUTE_UNUSED,
+                           void *parseOpaque ATTRIBUTE_UNUSED)
 {
     if (dev->type == VIR_DOMAIN_DEVICE_NET &&
         (dev->data.net->type == VIR_DOMAIN_NET_TYPE_NETWORK ||
@@ -849,7 +851,7 @@ vzDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     if ((def = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                       parse_flags)) == NULL)
+                                       NULL, parse_flags)) == NULL)
         goto cleanup;
 
     if (virDomainDefineXMLFlagsEnsureACL(conn, def) < 0)
@@ -3045,6 +3047,7 @@ vzDomainMigratePrepare3Params(virConnectPtr conn,
         goto cleanup;
 
     if (!(def = virDomainDefParseString(dom_xml, driver->caps, driver->xmlopt,
+                                        NULL,
                                         VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto cleanup;
 

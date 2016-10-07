@@ -692,7 +692,7 @@ qemuMonitorIO(int watch, int fd, int events, void *opaque)
             hangup = true;
             if (!error) {
                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                               _("End of file from monitor"));
+                               _("End of file from qemu monitor"));
                 eof = true;
                 events &= ~VIR_EVENT_HANDLE_HANGUP;
             }
@@ -1772,6 +1772,9 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
     char *tmp;
     int order = 1;
     size_t totalvcpus = 0;
+    size_t mastervcpu; /* this iterator is used for iterating hotpluggable entities */
+    size_t slavevcpu; /* this corresponds to subentries of a hotpluggable entry */
+    size_t anyvcpu; /* this iterator is used for any vcpu entry in the result */
     size_t i;
     size_t j;
 
@@ -1812,46 +1815,55 @@ qemuMonitorGetCPUInfoHotplug(struct qemuMonitorQueryHotpluggableCpusEntry *hotpl
     /* transfer appropriate data from the hotpluggable list to corresponding
      * entries. the entries returned by qemu may in fact describe multiple
      * logical vcpus in the guest */
-    j = 0;
+    mastervcpu = 0;
     for (i = 0; i < nhotplugvcpus; i++) {
-        vcpus[j].socket_id = hotplugvcpus[i].socket_id;
-        vcpus[j].core_id = hotplugvcpus[i].core_id;
-        vcpus[j].thread_id = hotplugvcpus[i].thread_id;
-        vcpus[j].vcpus = hotplugvcpus[i].vcpus;
-        VIR_STEAL_PTR(vcpus[j].qom_path, hotplugvcpus[i].qom_path);
-        VIR_STEAL_PTR(vcpus[j].alias, hotplugvcpus[i].alias);
-        VIR_STEAL_PTR(vcpus[j].type, hotplugvcpus[i].type);
-        vcpus[j].id = hotplugvcpus[i].enable_id;
+        vcpus[mastervcpu].online = !!hotplugvcpus[i].qom_path;
+        vcpus[mastervcpu].hotpluggable = !!hotplugvcpus[i].alias ||
+                                         !vcpus[mastervcpu].online;
+        vcpus[mastervcpu].socket_id = hotplugvcpus[i].socket_id;
+        vcpus[mastervcpu].core_id = hotplugvcpus[i].core_id;
+        vcpus[mastervcpu].thread_id = hotplugvcpus[i].thread_id;
+        vcpus[mastervcpu].vcpus = hotplugvcpus[i].vcpus;
+        VIR_STEAL_PTR(vcpus[mastervcpu].qom_path, hotplugvcpus[i].qom_path);
+        VIR_STEAL_PTR(vcpus[mastervcpu].alias, hotplugvcpus[i].alias);
+        VIR_STEAL_PTR(vcpus[mastervcpu].type, hotplugvcpus[i].type);
+        vcpus[mastervcpu].id = hotplugvcpus[i].enable_id;
 
-        /* skip over vcpu entries covered by this hotpluggable entry */
-        j += hotplugvcpus[i].vcpus;
+        /* copy state information to slave vcpus */
+        for (slavevcpu = mastervcpu + 1; slavevcpu < mastervcpu + hotplugvcpus[i].vcpus; slavevcpu++) {
+            vcpus[slavevcpu].online = vcpus[mastervcpu].online;
+            vcpus[slavevcpu].hotpluggable = vcpus[mastervcpu].hotpluggable;
+        }
+
+        /* calculate next master vcpu (hotpluggable unit) entry */
+        mastervcpu += hotplugvcpus[i].vcpus;
     }
 
     /* match entries from query cpus to the output array taking into account
      * multi-vcpu objects */
     for (j = 0; j < ncpuentries; j++) {
         /* find the correct entry or beginning of group of entries */
-        for (i = 0; i < maxvcpus; i++) {
-            if (cpuentries[j].qom_path && vcpus[i].qom_path &&
-                STREQ(cpuentries[j].qom_path, vcpus[i].qom_path))
+        for (anyvcpu = 0; anyvcpu < maxvcpus; anyvcpu++) {
+            if (cpuentries[j].qom_path && vcpus[anyvcpu].qom_path &&
+                STREQ(cpuentries[j].qom_path, vcpus[anyvcpu].qom_path))
                 break;
         }
 
-        if (i == maxvcpus) {
+        if (anyvcpu == maxvcpus) {
             VIR_DEBUG("too many query-cpus entries for a given "
                       "query-hotpluggable-cpus entry");
             return -1;
         }
 
-        if (vcpus[i].vcpus != 1) {
+        if (vcpus[anyvcpu].vcpus != 1) {
             /* find a possibly empty vcpu thread for core granularity systems */
-            for (; i < maxvcpus; i++) {
-                if (vcpus[i].tid == 0)
+            for (; anyvcpu < maxvcpus; anyvcpu++) {
+                if (vcpus[anyvcpu].tid == 0)
                     break;
             }
         }
 
-        vcpus[i].tid = cpuentries[j].tid;
+        vcpus[anyvcpu].tid = cpuentries[j].tid;
     }
 
     return 0;
@@ -1886,13 +1898,13 @@ qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
     int rc;
     qemuMonitorCPUInfoPtr info = NULL;
 
-    if (hotplug)
-        QEMU_CHECK_MONITOR_JSON(mon);
-    else
-        QEMU_CHECK_MONITOR(mon);
+    QEMU_CHECK_MONITOR(mon);
 
     if (VIR_ALLOC_N(info, maxvcpus) < 0)
         return -1;
+
+    if (!mon->json)
+        hotplug = false;
 
     /* initialize a few non-zero defaults */
     qemuMonitorCPUInfoClear(info, maxvcpus);
@@ -3575,13 +3587,23 @@ qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine)
 
 int
 qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
-                             char ***cpus)
+                             qemuMonitorCPUDefInfoPtr **cpus)
 {
     VIR_DEBUG("cpus=%p", cpus);
 
     QEMU_CHECK_MONITOR_JSON(mon);
 
     return qemuMonitorJSONGetCPUDefinitions(mon, cpus);
+}
+
+
+void
+qemuMonitorCPUDefInfoFree(qemuMonitorCPUDefInfoPtr cpu)
+{
+    if (!cpu)
+        return;
+    VIR_FREE(cpu->name);
+    VIR_FREE(cpu);
 }
 
 
