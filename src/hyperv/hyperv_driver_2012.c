@@ -1065,7 +1065,7 @@ hypervDomainDefineXML2012(virConnectPtr conn, const char *xml)
     char uuid_string[VIR_UUID_STRING_BUFLEN];
 
     /* Parse XML domain description */
-    if ((def = virDomainDefParseString(xml, priv->caps, priv->xmlopt,
+    if ((def = virDomainDefParseString(xml, priv->caps, priv->xmlopt, NULL,
                                        1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE)) == NULL) {
         goto cleanup;
     }

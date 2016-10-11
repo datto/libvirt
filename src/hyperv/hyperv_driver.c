@@ -3462,7 +3462,7 @@ hypervDomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
     if ((xmlDomain = hypervDomainGetXMLDesc(domain, 0)) == NULL) {
         goto cleanup;
     }
-    if ((def = virDomainDefParseString(xmlDomain, priv->caps, priv->xmlopt,
+    if ((def = virDomainDefParseString(xmlDomain, priv->caps, priv->xmlopt, NULL,
                                        1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE)) == NULL) {
         goto cleanup;
     }
@@ -3533,7 +3533,7 @@ hypervDomainDefineXML(virConnectPtr conn, const char *xml)
     char uuid_string[VIR_UUID_STRING_BUFLEN];
 
     /* Parse XML domain description */
-    if ((def = virDomainDefParseString(xml, priv->caps, priv->xmlopt,
+    if ((def = virDomainDefParseString(xml, priv->caps, priv->xmlopt, NULL,
                                        1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE)) == NULL) {
         goto cleanup;
     }
