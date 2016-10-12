@@ -376,7 +376,7 @@ class Win32_ComputerSystem
     string   Caption
     uint16   ChassisBootupState
     string   CreationClassName
-    int16    CurrentTimeZone
+#    int16    CurrentTimeZone
     boolean  DaylightInEffect
     string   Description
     string   DNSHostName
@@ -736,29 +736,28 @@ class Msvm_VirtualSwitch
     uint32   MaxChimneyOffloads
 end
 
-
 class Msvm_VirtualSystemManagementService
-	string   Caption
-	string   Description
-	string   ElementName
-	datetime InstallDate
-	uint16   OperationalStatus
-	string   StatusDescriptions
-	string   Status
-	uint16   HealthState
-	uint16   EnabledState
-	string   OtherEnabledState
-	uint16   RequestedState
-	uint16   EnabledDefault
-	datetime TimeOfLastStateChange
-	string   SystemCreationClassName
-	string   SystemName
-	string   CreationClassName
-	string   Name
-	string   PrimaryOwnerName
-	string   PrimaryOwnerContact
-	string   StartMode
-	boolean  Started
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    uint16   OperationalStatus
+    string   StatusDescriptions
+    string   Status
+    uint16   HealthState
+    uint16   EnabledState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    datetime TimeOfLastStateChange
+    string   SystemCreationClassName
+    string   SystemName
+    string   CreationClassName
+    string   Name
+    string   PrimaryOwnerName
+    string   PrimaryOwnerContact
+    string   StartMode
+    boolean  Started
 end
 
 class Msvm_VirtualSystemManagementService_2012
@@ -767,6 +766,7 @@ class Msvm_VirtualSystemManagementService_2012
     string   Description
     string   ElementName
     datetime InstallDate
+    string   Name
     uint16   OperationalStatus[]
     string   StatusDescriptions[]
     string   Status
@@ -785,13 +785,11 @@ class Msvm_VirtualSystemManagementService_2012
     string   SystemCreationClassName
     string   SystemName
     string   CreationClassName
-    string   Name
     string   PrimaryOwnerName
     string   PrimaryOwnerContact
     string   StartMode
     boolean  Started
 end
-
 
 class Msvm_VirtualSystemGlobalSettingData
     string   Caption
@@ -817,163 +815,159 @@ class Msvm_VirtualSystemGlobalSettingData
     string   Version
 end
 
-
 class Msvm_VirtualSwitch
-	string Caption
-	string Description
-	string ElementName
-	datetime InstallDate
-	uint16 OperationalStatus[]
-	string StatusDescriptions[]
-	string Status
-	uint16 HealthState
-	uint16 EnabledState
-	string OtherEnabledState
-	uint16 RequestedState
-	uint16 EnabledDefault
-	datetime TimeOfLastStateChange
-	string CreationClassName
-	string Name
-	string PrimaryOwnerContact
-	string PrimaryOwnerName
-	string Roles[]
-	string NameFormat
-	string OtherIdentifyingInfo[]
-	string IdentifyingDescriptions[]
-	uint16 Dedicated[]
-	string OtherDedicatedDescriptions[]
-	uint16 ResetCapability
-	uint16 PowerManagementCapabilities[]
-	string ScopeOfResidence
-	uint32 NumLearnableAddresses
-	uint32 MaxVMQOffloads
-	uint32 MaxChimneyOffloads
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    uint16   OperationalStatus[]
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    uint16   EnabledState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    datetime TimeOfLastStateChange
+    string   CreationClassName
+    string   Name
+    string   PrimaryOwnerContact
+    string   PrimaryOwnerName
+    string   Roles[]
+    string   NameFormat
+    string   OtherIdentifyingInfo[]
+    string   IdentifyingDescriptions[]
+    uint16   Dedicated[]
+    string   OtherDedicatedDescriptions[]
+    uint16   ResetCapability
+    uint16   PowerManagementCapabilities[]
+    string   ScopeOfResidence
+    uint32   NumLearnableAddresses
+    uint32   MaxVMQOffloads
+    uint32   MaxChimneyOffloads
 end
-
 
 class Msvm_ResourceAllocationSettingData
-	string  Caption
-	string  Description
-	string  InstanceID
-	string  ElementName
-	uint16  ResourceType
-	string  OtherResourceType
-	string  ResourceSubType
-	string  PoolID
-	uint16  ConsumerVisibility
-	string  HostResource[]
-	string  AllocationUnits
-	uint64  VirtualQuantity
-	uint64  Reservation
-	uint64  Limit
-	uint32  Weight
-	boolean AutomaticAllocation
-	boolean AutomaticDeallocation
-	string  Parent
-	string  Connection[]
-	string  Address
-	uint16  MappingBehavior
-	string  VirtualSystemIdentifiers[]
+    string   Caption
+    string   Description
+    string   InstanceID
+    string   ElementName
+    uint16   ResourceType
+    string   OtherResourceType
+    string   ResourceSubType
+    string   PoolID
+    uint16   ConsumerVisibility
+    string   HostResource[]
+    string   AllocationUnits
+    uint64   VirtualQuantity
+    uint64   Reservation
+    uint64   Limit
+    uint32   Weight
+    boolean  AutomaticAllocation
+    boolean  AutomaticDeallocation
+    string   Parent
+    string   Connection[]
+    string   Address
+    uint16   MappingBehavior
+    string   VirtualSystemIdentifiers[]
 end
-
 
 class Msvm_AllocationCapabilities
-	string Caption
-	string Description
-	string ElementName
-	string InstanceID
-	string OtherResourceType
-	uint16 RequestTypesSupported
-	string ResourceSubType
-	uint16 ResourceType
-	uint16 SharingMode
-	uint16 SupportedAddStates[]
-	uint16 SupportedRemoveStates[]
+    string   Caption
+    string   Description
+    string   ElementName
+    string   InstanceID
+    string   OtherResourceType
+    uint16   RequestTypesSupported
+    string   ResourceSubType
+    uint16   ResourceType
+    uint16   SharingMode
+    uint16   SupportedAddStates[]
+    uint16   SupportedRemoveStates[]
 end
 
-
 class Msvm_SwitchPort
-	string Caption
-	string ElementName
-	datetime InstallDate
-	string StatusDescriptions[]
-	string Status
-	uint16 HealthState
-	string OtherEnabledState
-	uint16 RequestedState
-	uint16 EnabledDefault
-	string SystemCreationClassName
-	string SystemName
-	string CreationClassName
-	string Description
-	uint16 OperationalStatus[]
-	uint16 EnabledState
-	datetime TimeOfLastStateChange
-	string Name
-	string NameFormat
-	uint16 ProtocolType
-	uint16 ProtocolIFType
-	string OtherTypeDescription
-	boolean BroadcastResetSupported
-	uint16 PortNumber
-	string ScopeOfResidence
-	uint32 VMQOffloadWeight
-	uint32 ChimneyOffloadWeight
-	uint32 VMQOffloadUsage
-	uint32 ChimneyOffloadUsage
-	uint32 VMQOffloadLimit
-	uint32 ChimneyOffloadLimit
-	boolean AllowMacSpoofing
+    string   Caption
+    string   ElementName
+    datetime InstallDate
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    string   SystemCreationClassName
+    string   SystemName
+    string   CreationClassName
+    string   Description
+    uint16   OperationalStatus[]
+    uint16   EnabledState
+    datetime TimeOfLastStateChange
+    string   Name
+    string   NameFormat
+    uint16   ProtocolType
+    uint16   ProtocolIFType
+    string   OtherTypeDescription
+    boolean  BroadcastResetSupported
+    uint16   PortNumber
+    string   ScopeOfResidence
+    uint32   VMQOffloadWeight
+    uint32   ChimneyOffloadWeight
+    uint32   VMQOffloadUsage
+    uint32   ChimneyOffloadUsage
+    uint32   VMQOffloadLimit
+    uint32   ChimneyOffloadLimit
+    boolean  AllowMacSpoofing
 end
 
 class Msvm_SyntheticEthernetPortSettingData
-	string Caption
-	string Description
-	string InstanceID
-	string ElementName
-	uint16 ResourceType
-	string OtherResourceType
-	string ResourceSubType
-	string PoolID
-	uint16 ConsumerVisibility
-	string HostResource[]
-	string AllocationUnits
-	uint64 VirtualQuantity
-	uint64 Reservation
-	uint64 Limit
-	uint32 Weight
-	boolean AutomaticAllocation
-	boolean AutomaticDeallocation
-	string Parent
-	string Connection[]
-	string Address
-	uint16 MappingBehavior
-	string VirtualSystemIdentifiers[]
-	boolean StaticMacAddress
+    string   Caption
+    string   Description
+    string   InstanceID
+    string   ElementName
+    uint16   ResourceType
+    string   OtherResourceType
+    string   ResourceSubType
+    string   PoolID
+    uint16   ConsumerVisibility
+    string   HostResource[]
+    string   AllocationUnits
+    uint64   VirtualQuantity
+    uint64   Reservation
+    uint64   Limit
+    uint32   Weight
+    boolean  AutomaticAllocation
+    boolean  AutomaticDeallocation
+    string   Parent
+    string   Connection[]
+    string   Address
+    uint16   MappingBehavior
+    string   VirtualSystemIdentifiers[]
+    boolean  StaticMacAddress
 end
 
 class Msvm_VirtualSwitchManagementService
-	string Caption
-	string Description
-	string ElementName
-	datetime InstallDate
-	uint16 OperationalStatus[]
-	string StatusDescriptions[]
-	string Status
-	uint16 HealthState
-	uint16 EnabledState
-	string OtherEnabledState
-	uint16 RequestedState
-	uint16 EnabledDefault
-	datetime TimeOfLastStateChange
-	string SystemCreationClassName
-	string SystemName
-	string CreationClassName
-	string Name
-	string PrimaryOwnerName
-	string PrimaryOwnerContact
-	string StartMode
-	boolean Started
+    string   Caption
+    string   Description
+    string   ElementName
+    datetime InstallDate
+    uint16   OperationalStatus[]
+    string   StatusDescriptions[]
+    string   Status
+    uint16   HealthState
+    uint16   EnabledState
+    string   OtherEnabledState
+    uint16   RequestedState
+    uint16   EnabledDefault
+    datetime TimeOfLastStateChange
+    string   SystemCreationClassName
+    string   SystemName
+    string   CreationClassName
+    string   Name
+    string   PrimaryOwnerName
+    string   PrimaryOwnerContact
+    string   StartMode
+    boolean  Started
 end
 
 class Msvm_VirtualHardDiskSettingData
@@ -1049,45 +1043,8 @@ end
 
 class Msvm_Keyboard_2012
     string   InstanceID
-    string   ElementName
-    uint16   ResourceType
-    string   OtherResourceType
-    string   ResourceSubType
-    string   PoolID
-    uint16   ConsumerVisibility
-    string   HostResource[]
-    string   AllocationUnits
-    uint64   VirtualQuantity
-    uint64   Reservation
-    uint64   Limit
-    uint32   Weight
-    boolean  AutomaticAllocation
-    boolean  AutomaticDeallocation
-    string   Parent
-    string   Connection[]
-    string   Address
-    uint16   MappingBehavior
-    string   VirtualSystemIdentifiers[]
-end
-
-
-class Msvm_AllocationCapabilities
     string   Caption
     string   Description
-    string   ElementName
-    string   InstanceID
-    string   OtherResourceType
-    uint16   RequestTypesSupported
-    string   ResourceSubType
-    uint16   ResourceType
-    uint16   SharingMode
-    uint16   SupportedAddStates[]
-    uint16   SupportedRemoveStates[]
-end
-
-
-class Msvm_SwitchPort
-    string   Caption
     string   ElementName
     datetime InstallDate
     string   Name
@@ -1131,78 +1088,22 @@ class Msvm_SwitchPort
 end
 
 class Msvm_DiskDrive
-    string   Caption
-    string   Description
-    string   ElementName
-    datetime InstallDate
-    string   Name
-    uint16   OperationalStatus[]
-    string   StatusDescriptions[]
-    string   Status
-    uint16   HealthState
-    uint16   EnabledState
-    string   OtherEnabledState
-    uint16   RequestedState
-    uint16   EnabledDefault
-    datetime TimeOfLastStateChange
-    string   SystemCreationClassName
-    string   SystemName
-#    uint16   CreationClassName  # Microsoft documentation is wrong!
     string   CreationClassName
-    string   DeviceID
-    boolean  PowerManagementSupported
-    uint16   PowerManagementCapabilities[]
-    uint16   Availability
-    uint16   StatusInfo
-    uint32   LastErrorCode
-    string   ErrorDescription
-    boolean  ErrorCleared
+    string   Name
+    string   PrimaryOwnerContact
+    string   PrimaryOwnerName
+    string   Roles[]
+    string   NameFormat
     string   OtherIdentifyingInfo[]
-    uint64   PowerOnHours
-    uint64   TotalPowerOnHours
     string   IdentifyingDescriptions[]
-    uint16   AdditionalAvailability[]
-    uint64   MaxQuiesceTime
-    uint16   LocationIndicator
-    uint16   Capabilities[]
-    string   CapabilityDescriptions[]
-    string   ErrorMethodology
-    string   CompressionMethod
-    uint32   NumberOfMediaSupported
-    uint64   MaxMediaSize
-    uint64   DefaultBlockSize
-    uint64   MaxBlockSize
-    uint64   MinBlockSize
-    boolean  NeedsCleaning
-    boolean  MediaIsLocked
-    uint16   Security
-    datetime LastCleaned
-    uint64   MaxAccessTime
-    uint32   UncompressedDataRate
-    uint64   LoadTime
-    uint64   UnloadTime
-    uint64   MountCount
-    datetime TimeOfLastMount
-    uint64   TotalMountTime
-    string   UnitsDescription
-    uint64   MaxUnitsBeforeCleaning
-    uint64   UnitsUsed
+    uint16   Dedicated[]
+    string   OtherDedicatedDescriptions[]
+    uint16   ResetCapability
     uint32   DriveNumber
+    uint16   PowerManagementCapabilities[]
+    string   ScopeOfResidence
+    uint32   NumLearnableAddresses
+    uint32   MaxVMQOffloads
+    uint32   MaxChimneyOffloads
 end
 
-
-class Msvm_VirtualHardDiskSettingData
-    string   InstanceID
-    string   Caption
-    string   Description
-    string   ElementName
-    uint16   Type
-    uint16   Format
-    string   Path
-    string   ParentPath
-    uint64   MaxInternalSize
-    uint32   BlockSize
-    uint32   LogicalSectorSize
-    uint32   PhysicalSectorSize
-    string   VirtualDiskId
-end
