@@ -1,6 +1,7 @@
 /*
  * hyperv_driver.c: core driver functions for managing Microsoft Hyper-V hosts
  *
+ * Copyright (C) 2016 Datto Inc.
  * Copyright (C) 2011-2013 Matthias Bolte <matthias.bolte@googlemail.com>
  * Copyright (C) 2009 Michael Sievers <msievers83@googlemail.com>
  *
@@ -175,6 +176,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     /* Set up driver functions based on what API version the server uses. */
     hypervHypervisorDriver.connectGetType = hyperv1ConnectGetType; /* 0.9.5 */
     hypervHypervisorDriver.connectGetHostname = hyperv1ConnectGetHostname; /* 0.9.5 */
+    hypervHypervisorDriver.nodeGetInfo = hyperv1NodeGetInfo; /* 0.9.5 */
     hypervHypervisorDriver.connectListDomains = hyperv1ConnectListDomains; /* 0.9.5 */
     hypervHypervisorDriver.connectNumOfDomains = hyperv1ConnectNumOfDomains; /* 0.9.5 */
     hypervHypervisorDriver.connectListAllDomains = hyperv1ConnectListAllDomains; /* 0.10.2 */
@@ -193,6 +195,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     hypervHypervisorDriver.connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
     hypervHypervisorDriver.domainCreate = hyperv1DomainCreate; /* 0.9.5 */
     hypervHypervisorDriver.domainCreateWithFlags = hyperv1DomainCreateWithFlags; /* 0.9.5 */
+    hypervHypervisorDriver.domainIsActive = hyperv1DomainIsActive;
     hypervHypervisorDriver.domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
     hypervHypervisorDriver.domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */
     hypervHypervisorDriver.domainManagedSaveRemove = hyperv1DomainManagedSaveRemove; /* 0.9.5 */
