@@ -38,6 +38,282 @@
 VIR_LOG_INIT("hyperv.hyperv_api_v1")
 
 /*
+ * WMI utility functions
+ *
+ * wrapper functions for commonly-accessed WMI objects and interfaces.
+ */
+
+static int
+hyperv1GetProcessorsByName(hypervPrivate *priv, const char *name,
+        Win32_Processor **processorList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    /* Get Win32_Processor list */
+    virBufferAsprintf(&query,
+                      "associators of "
+                      "{Win32_ComputerSystem.Name=\"%s\"} "
+                      "where AssocClass = Win32_ComputerSystemProcessor "
+                      "ResultClass = Win32_Processor",
+                      name);
+
+    if (hypervGetWin32ProcessorList(priv, &query, processorList) < 0)
+        goto cleanup;
+
+    if (processorList == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s"),
+                       "Win32_Processor");
+        goto cleanup;
+    }
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetActiveVirtualSystemList(hypervPrivate *priv,
+        Msvm_ComputerSystem **computerSystemList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0) {
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+/* gets all the vms including the ones that are marked inactive. */
+static int
+hyperv1GetInactiveVirtualSystemList(hypervPrivate *priv,
+        Msvm_ComputerSystem **list)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, "and ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, list) < 0)
+        goto cleanup;
+
+    if (*list == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetPhysicalSystemList(hypervPrivate *priv,
+        Win32_ComputerSystem **computerSystemList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+
+    if (hypervGetWin32ComputerSystemList(priv, &query, computerSystemList) < 0)
+        goto cleanup;
+
+    if (computerSystemList == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not lookup %s"),
+                "Win32_ComputerSystem");
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetVirtualSystemByID(hypervPrivate *priv, int id,
+        Msvm_ComputerSystem **computerSystemList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and ProcessID = %d", id);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+        goto cleanup;
+
+    if (*computerSystemList == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    return result;
+}
+
+static int
+hyperv1GetVirtualSystemByUUID(hypervPrivate *priv, const char *uuid,
+        Msvm_ComputerSystem **computerSystemList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and Name = \"%s\"", uuid);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+        goto cleanup;
+
+    if (*computerSystemList == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+
+static int
+hyperv1GetVirtualSystemByName(hypervPrivate *priv, const char *name,
+        Msvm_ComputerSystem **computerSystemList)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and ElementName = \"%s\"", name);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+        goto cleanup;
+
+    if (*computerSystemList == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetVSSDFromUUID(hypervPrivate *priv, const char *uuid,
+        Msvm_VirtualSystemSettingData **data)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    /* Get Msvm_VirtualSystemSettingData */
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_ComputerSystem.CreationClassname=\"Msvm_ComputerSystem\","
+            "Name=\"%s\"} "
+            "where AssocClass = Msvm_SettingsDefineState "
+            "ResultClass = Msvm_VirtualSystemSettingData",
+            uuid);
+
+    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query, data) < 0)
+        goto cleanup;
+
+    if (*data == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetProcSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
+        Msvm_ProcessorSettingData **data)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    /* Get Msvm_ProcessorSettingData */
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+            "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+            "ResultClass = Msvm_ProcessorSettingData",
+            id);
+
+    if (hypervGetMsvmProcessorSettingDataList(priv, &query, data) < 0)
+        goto cleanup;
+
+    if (*data == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1GetMemSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
+        Msvm_MemorySettingData **data)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    /* Get Msvm_MemorySettingData */
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+            "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+            "ResultClass = Msvm_MemorySettingData",
+            id);
+
+    if (hypervGetMsvmMemorySettingDataList(priv, &query, data) < 0)
+        goto cleanup;
+
+    if (*data == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+/*
  * Driver funtions
  */
 
@@ -57,15 +333,8 @@ hyperv1ConnectGetHostname(virConnectPtr conn)
 
     virBufferAddLit(&query, WIN32_COMPUTERSYSTEM_WQL_SELECT);
 
-    if (hypervGetWin32ComputerSystemList(priv, &query, &computerSystem) < 0)
+    if (hyperv1GetPhysicalSystemList(priv, &computerSystem) < 0)
         goto cleanup;
-
-    if (computerSystem == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not lookup %s"),
-                       "Win32_ComputerSystem");
-        goto cleanup;
-    }
 
     ignore_value(VIR_STRDUP(hostname, computerSystem->data->DNSHostName));
 
@@ -101,21 +370,8 @@ hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
         goto cleanup;
     }
 
-    /* Get Win32_Processor list */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Win32_ComputerSystem.Name=\"%s\"} "
-                      "where AssocClass = Win32_ComputerSystemProcessor "
-                      "ResultClass = Win32_Processor",
-                      computerSystem->data->Name);
-
-    if (hypervGetWin32ProcessorList(priv, &query, &processorList) < 0)
-        goto cleanup;
-
-    if (processorList == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not lookup %s"),
-                       "Win32_Processor");
+    if (hyperv1GetProcessorsByName(priv, computerSystem->data->Name,
+                &processorList) < 0) {
         goto cleanup;
     }
 
@@ -174,7 +430,6 @@ hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -182,16 +437,8 @@ hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     if (maxids == 0)
         return 0;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    if (hyperv1GetActiveVirtualSystemList(priv, &computerSystemList) < 0)
         goto cleanup;
-    }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
@@ -214,21 +461,12 @@ hyperv1ConnectNumOfDomains(virConnectPtr conn)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    if (hyperv1GetActiveVirtualSystemList(priv, &computerSystemList) < 0)
         goto cleanup;
-    }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
@@ -248,18 +486,9 @@ hyperv1DomainLookupByID(virConnectPtr conn, int id)
 {
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAsprintf(&query, "and ProcessID = %d", id);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
+    if (hyperv1GetVirtualSystemByID(priv, id, &computerSystem) < 0) {
         virReportError(VIR_ERR_NO_DOMAIN, _("No domain with ID %d"), id);
         goto cleanup;
     }
@@ -278,20 +507,11 @@ hyperv1DomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
     virUUIDFormat(uuid, uuid_string);
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
+    if (hyperv1GetVirtualSystemByUUID(priv, uuid_string, &computerSystem) < 0) {
         virReportError(VIR_ERR_NO_DOMAIN,
                        _("No domain with UUID %s"), uuid_string);
         goto cleanup;
@@ -310,20 +530,11 @@ hyperv1DomainLookupByName(virConnectPtr conn, const char *name)
 {
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAsprintf(&query, "and ElementName = \"%s\"", name);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
-        virReportError(VIR_ERR_NO_DOMAIN,
-                       _("No domain with name %s"), name);
+    if (hyperv1GetVirtualSystemByName(priv, name, &computerSystem) < 0) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Domain is not active or is in state transition"));
         goto cleanup;
     }
 
@@ -412,7 +623,6 @@ hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags)
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
-
     return result;
 }
 
@@ -437,7 +647,6 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
@@ -451,21 +660,8 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    /* Get Msvm_VirtualSystemSettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
-                      "Name=\"%s\"} "
-                      "where AssocClass = Msvm_SettingsDefineState "
-                      "ResultClass = Msvm_VirtualSystemSettingData",
-                      uuid_string);
-
-    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query,
-                                                  &virtualSystemSettingData) < 0) {
-        goto cleanup;
-    }
-
-    if (virtualSystemSettingData == NULL) {
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string,
+                &virtualSystemSettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_VirtualSystemSettingData",
@@ -473,20 +669,9 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
         goto cleanup;
     }
 
-    /* Get Msvm_ProcessorSettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
-                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
-                      "ResultClass = Msvm_ProcessorSettingData",
-                      virtualSystemSettingData->data->InstanceID);
-
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
-                                              &processorSettingData) < 0) {
-        goto cleanup;
-    }
-
-    if (processorSettingData == NULL) {
+    if (hyperv1GetProcSDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &processorSettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_ProcessorSettingData",
@@ -494,21 +679,9 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
         goto cleanup;
     }
 
-    /* Get Msvm_MemorySettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
-                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
-                      "ResultClass = Msvm_MemorySettingData",
-                      virtualSystemSettingData->data->InstanceID);
-
-    if (hypervGetMsvmMemorySettingDataList(priv, &query,
-                                           &memorySettingData) < 0) {
-        goto cleanup;
-    }
-
-
-    if (memorySettingData == NULL) {
+    if (hyperv1GetMemSDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &memorySettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_MemorySettingData",
@@ -567,7 +740,6 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDefPtr def = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
@@ -584,21 +756,8 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    /* Get Msvm_VirtualSystemSettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
-                      "Name=\"%s\"} "
-                      "where AssocClass = Msvm_SettingsDefineState "
-                      "ResultClass = Msvm_VirtualSystemSettingData",
-                      uuid_string);
-
-    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query,
-                                                  &virtualSystemSettingData) < 0) {
-        goto cleanup;
-    }
-
-    if (virtualSystemSettingData == NULL) {
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string,
+                &virtualSystemSettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_VirtualSystemSettingData",
@@ -607,19 +766,9 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     }
 
     /* Get Msvm_ProcessorSettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
-                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
-                      "ResultClass = Msvm_ProcessorSettingData",
-                      virtualSystemSettingData->data->InstanceID);
-
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
-                                              &processorSettingData) < 0) {
-        goto cleanup;
-    }
-
-    if (processorSettingData == NULL) {
+    if (hyperv1GetProcSDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &processorSettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_ProcessorSettingData",
@@ -628,20 +777,9 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     }
 
     /* Get Msvm_MemorySettingData */
-    virBufferAsprintf(&query,
-                      "associators of "
-                      "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
-                      "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
-                      "ResultClass = Msvm_MemorySettingData",
-                      virtualSystemSettingData->data->InstanceID);
-
-    if (hypervGetMsvmMemorySettingDataList(priv, &query,
-                                           &memorySettingData) < 0) {
-        goto cleanup;
-    }
-
-
-    if (memorySettingData == NULL) {
+    if (hyperv1GetMemSDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &memorySettingData) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_MemorySettingData",
@@ -706,7 +844,6 @@ hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -715,16 +852,8 @@ hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
     if (maxnames == 0)
         return 0;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    if (hyperv1GetInactiveVirtualSystemList(priv, &computerSystemList) < 0)
         goto cleanup;
-    }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
@@ -757,21 +886,12 @@ hyperv1ConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    if (hyperv1GetInactiveVirtualSystemList(priv, &computerSystemList) < 0)
         goto cleanup;
-    }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
