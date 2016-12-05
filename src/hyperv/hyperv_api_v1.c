@@ -997,6 +997,31 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 }
 
 int
+hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemGlobalSettingData *vsgsd = NULL;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_WQL_SELECT);
+    virBufferAsprintf(&query, "where SystemName = \"%s\"", uuid_string);
+
+    if (hypervGetMsvmVirtualSystemGlobalSettingDataList(priv, &query, &vsgsd) < 0)
+        goto cleanup;
+
+    *autostart = vsgsd->data->AutomaticStartupAction;
+    result = 0;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) vsgsd);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+int
 hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
         int maxnames)
 {

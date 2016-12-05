@@ -71,6 +71,7 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainGetInfo = hyperv1DomainGetInfo; /* 0.9.5 */
     d->domainGetState = hyperv1DomainGetState; /* 0.9.5 */
     d->domainGetXMLDesc = hyperv1DomainGetXMLDesc; /* 0.9.5 */
+    d->domainGetAutostart = hyperv1DomainGetAutostart; /* TODO: get current version */
     d->connectListDefinedDomains = hyperv1ConnectListDefinedDomains; /* 0.9.5 */
     d->connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
     d->domainCreate = hyperv1DomainCreate; /* 0.9.5 */
