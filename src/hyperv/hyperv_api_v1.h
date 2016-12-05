@@ -57,6 +57,7 @@ int hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info);
 int hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
         unsigned int flags);
 char *hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags);
+int hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart);
 int hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
         int maxnames);
 int hyperv1ConnectNumOfDefinedDomains(virConnectPtr conn);
