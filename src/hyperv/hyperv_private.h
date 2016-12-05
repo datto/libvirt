@@ -27,12 +27,16 @@
 # include "virerror.h"
 # include "hyperv_util.h"
 # include "openwsman.h"
+# include "capabilities.h"
 
 typedef struct _hypervPrivate hypervPrivate;
 
 struct _hypervPrivate {
     hypervParsedUri *parsedUri;
     WsManClient *client;
+    virCapsPtr caps;
 };
+
+void hypervFreePrivate(hypervPrivate **priv);
 
 #endif /* __HYPERV_PRIVATE_H__ */

@@ -313,6 +313,83 @@ cleanup:
     return result;
 }
 
+/* API-specific utility functions */
+static int
+hyperv1LookupHostSystemBiosUuid(hypervPrivate *priv, unsigned char *uuid)
+{
+    Win32_ComputerSystemProduct *computerSystem = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, WIN32_COMPUTERSYSTEMPRODUCT_WQL_SELECT);
+    if (hypervGetWin32ComputerSystemProductList(priv, &query,
+                &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    if (virUUIDParse(computerSystem->data->UUID, uuid) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not parse UUID from string '%s'"),
+                computerSystem->data->UUID);
+        goto cleanup;
+    }
+    result = 0;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+virCapsPtr
+hyperv1CapsInit(hypervPrivate *priv)
+{
+    virCapsPtr caps = NULL;
+    virCapsGuestPtr guest = NULL;
+
+    caps = virCapabilitiesNew(VIR_ARCH_X86_64, 1, 1);
+
+    if (caps == NULL) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    if (hyperv1LookupHostSystemBiosUuid(priv, caps->host.host_uuid) < 0) {
+        goto error;
+    }
+
+    /* i686 caps */
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_I686,
+            NULL, NULL, 0, NULL);
+    if (guest == NULL) {
+        goto error;
+    }
+
+    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL,
+                0, NULL) == NULL) {
+        goto error;
+    }
+
+    /* x86_64 caps */
+    guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64,
+            NULL, NULL, 0, NULL);
+    if (guest == NULL) {
+        goto error;
+    }
+
+    if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL,
+                0, NULL) == NULL) {
+        goto error;
+    }
+
+    return caps;
+
+error:
+    virObjectUnref(caps);
+    return NULL;
+}
+
+
 /*
  * Driver funtions
  */
