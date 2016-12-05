@@ -54,6 +54,7 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     /* Set up driver functions based on what API version the server uses. */
     d->connectGetType = hyperv1ConnectGetType; /* 0.9.5 */
     d->connectGetHostname = hyperv1ConnectGetHostname; /* 0.9.5 */
+    d->connectGetMaxVcpus = hyperv1ConnectGetMaxVcpus; /* TODO: get current version */
     d->nodeGetInfo = hyperv1NodeGetInfo; /* 0.9.5 */
     d->connectListDomains = hyperv1ConnectListDomains; /* 0.9.5 */
     d->connectNumOfDomains = hyperv1ConnectNumOfDomains; /* 0.9.5 */
