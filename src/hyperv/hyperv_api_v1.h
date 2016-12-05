@@ -40,6 +40,7 @@ virCapsPtr hyperv1CapsInit(hypervPrivate *priv);
 /* Driver functions */
 const char *hyperv1ConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED);
 char *hyperv1ConnectGetHostname(virConnectPtr conn);
+int hyperv1ConnectGetVersion(virConnectPtr conn, unsigned long *version);
 int hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED);
 int hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info);
 int hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids);
