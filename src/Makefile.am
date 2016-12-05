@@ -903,7 +903,7 @@ HYPERV_DRIVER_SOURCES =									\
 		hyperv/hyperv_util.c hyperv/hyperv_util.h				\
 		hyperv/hyperv_wmi.c hyperv/hyperv_wmi.h					\
 		hyperv/hyperv_wmi_classes.c hyperv/hyperv_wmi_classes.h			\
-		hyperv/hyperv_common.c hyperv/hyperv_common.h					\
+		hyperv/hyperv_private.c hyperv/hyperv_private.h					\
 		hyperv/hyperv_api_v1.c hyperv/hyperv_api_v1.h					\
 		hyperv/openwsman.h
 

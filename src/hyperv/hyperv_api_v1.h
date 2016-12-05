@@ -31,6 +31,11 @@
 #include "virauth.h"
 #include "viralloc.h"
 #include "viruuid.h"
+#include "capabilities.h"
+#include "hyperv_private.h"
+
+/* Exported utility functions */
+virCapsPtr hyperv1CapsInit(hypervPrivate *priv);
 
 /* Driver functions */
 const char *hyperv1ConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED);

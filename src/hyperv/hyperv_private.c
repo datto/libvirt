@@ -1,5 +1,5 @@
 /*
- * hyperv_common.h: common driver functions between Hyper-V API versions
+ * hyperv_private.c: Functions for working with internal hyperv data structures
  *
  * Copyright (C) 2016 Datto Inc.
  * Copyright (C) 2011-2013 Matthias Bolte <matthias.bolte@googlemail.com>
@@ -23,7 +23,12 @@
 #include <config.h>
 
 #include "viralloc.h"
-#include "hyperv_common.h"
+#include "domain_conf.h"
+#include "hyperv_private.h"
+#include "openwsman.h"
+
+#define VIR_FROM_THIS VIR_FROM_HYPERV
+
 
 void
 hypervFreePrivate(hypervPrivate **priv)
@@ -34,6 +39,10 @@ hypervFreePrivate(hypervPrivate **priv)
     if ((*priv)->client != NULL) {
         /* FIXME: This leaks memory due to bugs in openwsman <= 2.2.6 */
         wsmc_release((*priv)->client);
+    }
+
+    if ((*priv)->caps != NULL) {
+        virObjectUnref((*priv)->caps);
     }
 
     hypervFreeParsedUri(&(*priv)->parsedUri);

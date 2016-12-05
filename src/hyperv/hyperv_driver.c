@@ -32,7 +32,6 @@
 #include "viruuid.h"
 #include "hyperv_driver.h"
 #include "hyperv_private.h"
-#include "hyperv_common.h"
 #include "hyperv_util.h"
 #include "hyperv_wmi.h"
 #include "openwsman.h"
@@ -46,6 +45,52 @@ VIR_LOG_INIT("hyperv.hyperv_driver");
 
 /* Forward declarations */
 static virHypervisorDriver hypervHypervisorDriver;
+
+static int
+hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
+{
+    int result = -1;
+
+    /* Set up driver functions based on what API version the server uses. */
+    d->connectGetType = hyperv1ConnectGetType; /* 0.9.5 */
+    d->connectGetHostname = hyperv1ConnectGetHostname; /* 0.9.5 */
+    d->nodeGetInfo = hyperv1NodeGetInfo; /* 0.9.5 */
+    d->connectListDomains = hyperv1ConnectListDomains; /* 0.9.5 */
+    d->connectNumOfDomains = hyperv1ConnectNumOfDomains; /* 0.9.5 */
+    d->connectListAllDomains = hyperv1ConnectListAllDomains; /* 0.10.2 */
+    d->domainLookupByID = hyperv1DomainLookupByID; /* 0.9.5 */
+    d->domainLookupByUUID = hyperv1DomainLookupByUUID; /* 0.9.5 */
+    d->domainLookupByName = hyperv1DomainLookupByName; /* 0.9.5 */
+    d->domainSuspend = hyperv1DomainSuspend; /* 0.9.5 */
+    d->domainResume = hyperv1DomainResume; /* 0.9.5 */
+    d->domainDestroy = hyperv1DomainDestroy; /* 0.9.5 */
+    d->domainDestroyFlags = hyperv1DomainDestroyFlags; /* 0.9.5 */
+    d->domainGetOSType = hyperv1DomainGetOSType; /* 0.9.5 */
+    d->domainGetInfo = hyperv1DomainGetInfo; /* 0.9.5 */
+    d->domainGetState = hyperv1DomainGetState; /* 0.9.5 */
+    d->domainGetXMLDesc = hyperv1DomainGetXMLDesc; /* 0.9.5 */
+    d->connectListDefinedDomains = hyperv1ConnectListDefinedDomains; /* 0.9.5 */
+    d->connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
+    d->domainCreate = hyperv1DomainCreate; /* 0.9.5 */
+    d->domainCreateWithFlags = hyperv1DomainCreateWithFlags; /* 0.9.5 */
+    d->domainIsActive = hyperv1DomainIsActive;
+    d->domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
+    d->domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */
+    d->domainManagedSaveRemove = hyperv1DomainManagedSaveRemove; /* 0.9.5 */
+
+    /* set up capabilities */
+    priv->caps = hyperv1CapsInit(priv);
+    if (priv->caps == NULL) {
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    return result;
+}
+
+
 
 static virDrvOpenStatus
 hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
@@ -173,32 +218,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    /* Set up driver functions based on what API version the server uses. */
-    hypervHypervisorDriver.connectGetType = hyperv1ConnectGetType; /* 0.9.5 */
-    hypervHypervisorDriver.connectGetHostname = hyperv1ConnectGetHostname; /* 0.9.5 */
-    hypervHypervisorDriver.nodeGetInfo = hyperv1NodeGetInfo; /* 0.9.5 */
-    hypervHypervisorDriver.connectListDomains = hyperv1ConnectListDomains; /* 0.9.5 */
-    hypervHypervisorDriver.connectNumOfDomains = hyperv1ConnectNumOfDomains; /* 0.9.5 */
-    hypervHypervisorDriver.connectListAllDomains = hyperv1ConnectListAllDomains; /* 0.10.2 */
-    hypervHypervisorDriver.domainLookupByID = hyperv1DomainLookupByID; /* 0.9.5 */
-    hypervHypervisorDriver.domainLookupByUUID = hyperv1DomainLookupByUUID; /* 0.9.5 */
-    hypervHypervisorDriver.domainLookupByName = hyperv1DomainLookupByName; /* 0.9.5 */
-    hypervHypervisorDriver.domainSuspend = hyperv1DomainSuspend; /* 0.9.5 */
-    hypervHypervisorDriver.domainResume = hyperv1DomainResume; /* 0.9.5 */
-    hypervHypervisorDriver.domainDestroy = hyperv1DomainDestroy; /* 0.9.5 */
-    hypervHypervisorDriver.domainDestroyFlags = hyperv1DomainDestroyFlags; /* 0.9.5 */
-    hypervHypervisorDriver.domainGetOSType = hyperv1DomainGetOSType; /* 0.9.5 */
-    hypervHypervisorDriver.domainGetInfo = hyperv1DomainGetInfo; /* 0.9.5 */
-    hypervHypervisorDriver.domainGetState = hyperv1DomainGetState; /* 0.9.5 */
-    hypervHypervisorDriver.domainGetXMLDesc = hyperv1DomainGetXMLDesc; /* 0.9.5 */
-    hypervHypervisorDriver.connectListDefinedDomains = hyperv1ConnectListDefinedDomains; /* 0.9.5 */
-    hypervHypervisorDriver.connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
-    hypervHypervisorDriver.domainCreate = hyperv1DomainCreate; /* 0.9.5 */
-    hypervHypervisorDriver.domainCreateWithFlags = hyperv1DomainCreateWithFlags; /* 0.9.5 */
-    hypervHypervisorDriver.domainIsActive = hyperv1DomainIsActive;
-    hypervHypervisorDriver.domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
-    hypervHypervisorDriver.domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */
-    hypervHypervisorDriver.domainManagedSaveRemove = hyperv1DomainManagedSaveRemove; /* 0.9.5 */
+    hypervSetupV1(&hypervHypervisorDriver, priv);
 
     conn->privateData = priv;
     priv = NULL;
@@ -225,6 +245,21 @@ hypervConnectClose(virConnectPtr conn)
     conn->privateData = NULL;
 
     return 0;
+}
+
+
+static char*
+hypervConnectGetCapabilities(virConnectPtr conn)
+{
+    hypervPrivate *priv = conn->privateData;
+    char *xml = virCapabilitiesFormatXML(priv->caps);
+
+    if (xml == NULL) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    return xml;
 }
 
 
@@ -300,6 +335,7 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .connectIsSecure = hypervConnectIsSecure, /* 0.9.5 */
     .domainIsPersistent = hypervDomainIsPersistent, /* 0.9.5 */
     .domainIsUpdated = hypervDomainIsUpdated, /* 0.9.5 */
+    .connectGetCapabilities = hypervConnectGetCapabilities, /* TODO: replace with newest release */
 };
 
 
