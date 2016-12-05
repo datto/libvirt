@@ -422,6 +422,38 @@ hyperv1ConnectGetHostname(virConnectPtr conn)
 }
 
 int
+hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ProcessorSettingData *processorSettingData = NULL;
+
+    /* Get max processors definition */
+    virBufferAddLit(&query, "SELECT * FROM Msvm_ProcessorSettingData "
+            "WHERE InstanceID LIKE 'Microsoft:Definition%Maximum'");
+
+    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
+                &processorSettingData) < 0) {
+        goto cleanup;
+    }
+
+    if (processorSettingData == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not get maximum definition of Msvm_ProcessorSettingData"));
+        goto cleanup;
+    }
+
+    result = processorSettingData->data->SocketCount * processorSettingData->data->ProcessorsPerSocket;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) processorSettingData);
+    virBufferFreeAndReset(&query);
+
+    return result;
+}
+
+int
 hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
 {
     int result = -1;
