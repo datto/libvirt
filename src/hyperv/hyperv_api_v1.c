@@ -1137,6 +1137,59 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
     return result;
 }
 
+int
+hyperv1DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
+        unsigned char *cpumaps, int maplen)
+{
+    int count = 0, i;
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Win32_PerfRawData_HvStats_HyperVHypervisorVirtualProcessor
+        *vproc = NULL;
+
+    /* No cpumaps info returned by this api, so null out cpumaps */
+    if ((cpumaps != NULL) && (maplen > 0)) {
+        memset(cpumaps, 0, maxinfo * maplen);
+    }
+
+    for (i = 0; i < maxinfo; i++) {
+        /* try to free objects from previous iteration */
+        hypervFreeObject(priv, (hypervObject *) vproc);
+        vproc = NULL;
+        virBufferFreeAndReset(&query);
+        virBufferAddLit(&query, WIN32_PERFRAWDATA_HVSTATS_HYPERVHYPERVISORVIRTUALPROCESSOR_WQL_SELECT);
+        /* Attribute Name format : <domain_name>:Hv VP <vCPU_number> */
+        virBufferAsprintf(&query, "where Name = \"%s:Hv VP %d\"",
+                domain->name, i);
+
+        /* get the info */
+        if (hypervGetWin32PerfRawDataHvStatsHyperVHypervisorVirtualProcessorList(
+                    priv, &query, &vproc) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not get stats on vCPU #%d"), i);
+            continue;
+        }
+
+        /* Fill structure info */
+        info[i].number = i;
+        if (vproc) {
+            info[i].state = VIR_VCPU_RUNNING;
+            info[i].cpuTime = vproc->data->PercentTotalRunTime;
+            info[i].cpu = i;
+        } else {
+            info[i].state = VIR_VCPU_OFFLINE;
+            info[i].cpuTime = 0LLU;
+            info[i].cpu = -1;
+        }
+        count++;
+    }
+
+    hypervFreeObject(priv, (hypervObject *) vproc);
+    virBufferFreeAndReset(&query);
+
+    return count;
+}
+
 char *
 hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 {
