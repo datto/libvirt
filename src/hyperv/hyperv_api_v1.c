@@ -1138,6 +1138,63 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
 }
 
 int
+hyperv1DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ProcessorSettingData *proc_sd = NULL;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+
+    virCheckFlags(VIR_DOMAIN_VCPU_LIVE |
+                  VIR_DOMAIN_VCPU_CONFIG |
+                  VIR_DOMAIN_VCPU_MAXIMUM, -1);
+
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Start by getting the Msvm_ComputerSystem */
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
+        goto cleanup;
+    }
+
+    /* Check @flags to see if we are to query a running domain, and fail
+     * if that domain is not running */
+    if (flags & VIR_DOMAIN_VCPU_LIVE) {
+        if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED) {
+            virReportError(VIR_ERR_OPERATION_INVALID, "%s", _("Domain is not active"));
+            goto cleanup;
+        }
+    }
+
+    /* Check @flags to see if we are to return the maximum vCPU limit */
+    if (flags & VIR_DOMAIN_VCPU_MAXIMUM) {
+        result = hyperv1ConnectGetMaxVcpus(domain->conn, NULL);
+        goto cleanup;
+    }
+
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0) {
+        goto cleanup;
+    }
+
+    if (hyperv1GetProcSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &proc_sd) < 0) {
+        goto cleanup;
+    }
+
+    result = proc_sd->data->VirtualQuantity;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) proc_sd);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+int
 hyperv1DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
         unsigned char *cpumaps, int maplen)
 {
