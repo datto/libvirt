@@ -1247,6 +1247,15 @@ hyperv1DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
     return count;
 }
 
+int
+hyperv1DomainGetMaxVcpus(virDomainPtr dom)
+{
+    /* If the guest is inactive, this is basically the same as virConnectGetMaxVcpus() */
+    return (hyperv1DomainIsActive(dom)) ?
+        hyperv1DomainGetVcpusFlags(dom, (VIR_DOMAIN_VCPU_LIVE | VIR_DOMAIN_VCPU_MAXIMUM))
+        : hyperv1ConnectGetMaxVcpus(dom->conn, NULL);
+}
+
 char *
 hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 {
