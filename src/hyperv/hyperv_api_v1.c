@@ -21,6 +21,7 @@
  *
  */
 #include <config.h>
+#include <wsman-soap.h>
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -36,6 +37,217 @@
 #include "openwsman.h"
 
 VIR_LOG_INIT("hyperv.hyperv_api_v1")
+
+/*
+ * WMI invocation functions
+ *
+ * functions for invoking WMI methods via SOAP
+ */
+static int
+hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
+        const char *methodName, const char *resourceURI, const char *selector)
+{
+    int result = -1;
+    int returnCode;
+    char *instanceID = NULL;
+    char *xpath_expr_string = NULL;
+    char *returnValue = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    virBuffer xpath_expr_buf = VIR_BUFFER_INITIALIZER;
+    client_opt_t *options = NULL;
+    WsXmlDocH response = NULL;
+    Msvm_ConcreteJob *job = NULL;
+    int jobState = -1;
+    bool completed = false;
+
+    options = wsmc_options_init();
+
+    if (!options) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not init options"));
+        goto cleanup;
+    }
+
+    wsmc_add_selectors_from_str(options, selector);
+
+    /* Invoke action */
+    response = wsmc_action_invoke(priv->client, resourceURI, options,
+            methodName, xmlDocRoot);
+
+    /* check return code of invocation */
+    virBufferAsprintf(&xpath_expr_buf,
+            "/s:Envelope/s:Body/p:%s_OUTPUT/p:ReturnValue", methodName);
+    xpath_expr_string = virBufferContentAndReset(&xpath_expr_buf);
+    if (!xpath_expr_string) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not lookup %s for %s invocation"), "ReturnValue",
+                "RequestStateChange");
+        goto cleanup;
+    }
+
+    returnValue = ws_xml_get_xpath_value(response, xpath_expr_string);
+    VIR_FREE(xpath_expr_string);
+    xpath_expr_string = NULL;
+
+    if (!returnValue) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not lookup %s for %s invocation"), "ReturnValue",
+                "RequestStateChange");
+        goto cleanup;
+    }
+
+    if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not parse return code"));
+        goto cleanup;
+    }
+
+    if (returnCode == CIM_RETURNCODE_TRANSITION_STARTED) {
+        virBufferAsprintf(&xpath_expr_buf,
+                "/s:Envelope/s:Body/p:%s_OUTPUT/p:Job/a:ReferenceParameters/"
+                "w:SelectorSet/w:Selector[@Name='InstanceID']", methodName);
+        xpath_expr_string = virBufferContentAndReset(&xpath_expr_buf);
+        if (!xpath_expr_string) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not lookup %s for %s invocation"), "ReturnValue",
+                    "RequestStateChange");
+            goto cleanup;
+        }
+
+        /* Poll every 100ms until the job completes or fails */
+        while (!completed) {
+            virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
+            virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+
+            if (hypervGetMsvmConcreteJobList(priv, &query, &job) < 0) {
+                goto cleanup;
+            }
+
+            if (!job) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Could not lookup %s for %s invocation"), "ReturnValue",
+                        "RequestStateChange");
+                goto cleanup;
+            }
+
+            /* do things depending on the state */
+            jobState = job->data->JobState;
+            switch(jobState) {
+                case MSVM_CONCRETEJOB_JOBSTATE_NEW:
+                case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
+                case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
+                case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
+                    hypervFreeObject(priv, (hypervObject *) job);
+                    job = NULL;
+                    usleep(100 * 1000); /* sleep 100 ms */
+                    continue;
+                case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:
+                    completed = true;
+                    break;
+                case MSVM_CONCRETEJOB_JOBSTATE_TERMINATED:
+                case MSVM_CONCRETEJOB_JOBSTATE_KILLED:
+                case MSVM_CONCRETEJOB_JOBSTATE_EXCEPTION:
+                case MSVM_CONCRETEJOB_JOBSTATE_SERVICE:
+                    goto cleanup;
+                default:
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                            "Unknown state of invocation");
+                    goto cleanup;
+            }
+        }
+    } else if (returnCode != CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Invocation of %s returned an error: %s (%d)"),
+                "RequestStateChange", hypervReturnCodeToString(returnCode),
+                returnCode);
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    if (options)
+        wsmc_options_destroy(options);
+    if (response)
+        ws_xml_destroy_doc(response);
+    VIR_FREE(returnValue);
+    VIR_FREE(instanceID);
+    VIR_FREE(xpath_expr_string);
+    hypervFreeObject(priv, (hypervObject *) job);
+    virBufferFreeAndReset(&query);
+    virBufferFreeAndReset(&xpath_expr_buf);
+    return result;
+}
+
+static int
+hyperv1InvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParameters,
+        const char *methodName, const char *providerURI, const char *selector)
+{
+    int result = -1;
+    WsXmlDocH doc = NULL;
+    WsXmlNodeH methodNode = NULL;
+    simpleParam *simple;
+    eprParam *epr;
+    embeddedParam *embedded;
+    int i;
+
+    if (hypervCreateXmlStruct(methodName, providerURI, &doc, &methodNode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not create xml base structure"));
+        goto cleanup;
+    }
+
+    /* Process and include parameters */
+    for (i = 0; i < nbParameters; i++) {
+        switch(param_t[i].type) {
+            case SIMPLE_PARAM:
+                simple = (simpleParam *) param_t[i].param;
+                if (hypervAddSimpleParam(param_t[i].name, simple->value,
+                            providerURI, &methodNode) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Could not add simple param"));
+                    goto cleanup;
+                }
+                break;
+            case EPR_PARAM:
+                epr = (eprParam *) param_t[i].param;
+                if (hypervAddEprParam(param_t[i].name, epr->query,
+                            epr->wmiProviderURI, providerURI, &methodNode,
+                            doc, priv) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Could not add epr param"));
+                    goto cleanup;
+                }
+                break;
+            case EMBEDDED_PARAM:
+                embedded = (embeddedParam *) param_t[i].param;
+                if (hypervAddEmbeddedParam(embedded->prop_t, embedded->nbProps,
+                            param_t[i].name, embedded->instanceName,
+                            providerURI, &methodNode) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Could not add embedded param"));
+                    goto cleanup;
+                }
+                break;
+            default:
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("Unknown parameter type"));
+                goto cleanup;
+        }
+    }
+
+    /* invoke the method */
+    if (hyperv1InvokeMethodXml(priv, doc, methodName, providerURI, selector) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Error during invocation action"));
+        goto cleanup;
+    }
+
+    result = 0;
+cleanup:
+    if (!doc) {
+        ws_xml_destroy_doc(doc);
+    }
+    return result;
+}
 
 /*
  * WMI utility functions
