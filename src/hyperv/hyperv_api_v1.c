@@ -852,6 +852,40 @@ hyperv1ConnectNumOfDomains(virConnectPtr conn)
 }
 
 virDomainPtr
+hyperv1DomainCreateXML(virConnectPtr conn, const char *xmlDesc,
+        unsigned int flags)
+{
+    virDomainPtr domain;
+
+    virCheckFlags(VIR_DOMAIN_START_PAUSED | VIR_DOMAIN_START_AUTODESTROY, NULL);
+
+    /* create the new domain */
+    domain = hyperv1DomainDefineXML(conn, xmlDesc);
+    if (domain == NULL)
+        return NULL;
+
+    /* start the domain */
+    if (hypervInvokeMsvmComputerSystemRequestStateChange(domain,
+                MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not start domain %s"), domain->name);
+        return domain;
+    }
+
+    /* If VIR_DOMAIN_START_PAUSED is set, the guest domain will be started, but
+     * its CPUs will remain paused */
+    if (flags & VIR_DOMAIN_START_PAUSED) {
+        /* TODO: use hyperv1DomainSuspend to implement this */
+    }
+
+    if (flags & VIR_DOMAIN_START_AUTODESTROY) {
+        /* TODO: make auto destroy happen */
+    }
+
+    return domain;
+}
+
+virDomainPtr
 hyperv1DomainLookupByID(virConnectPtr conn, int id)
 {
     virDomainPtr domain = NULL;
@@ -1332,6 +1366,71 @@ int
 hyperv1DomainCreate(virDomainPtr domain)
 {
     return hyperv1DomainCreateWithFlags(domain, 0);
+}
+
+virDomainPtr
+hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
+{
+    hypervPrivate *priv = conn->privateData;
+    virDomainDefPtr def = NULL;
+    virDomainPtr domain = NULL;
+    invokeXmlParam *params = NULL;
+    properties_t *tab_props = NULL;
+    embeddedParam embedded_param;
+    int nb_params;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+
+    /* parse xml */
+    def = virDomainDefParseString(xml, priv->caps, priv->xmlopt, NULL,
+            1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE);
+
+    if (def == NULL)
+        goto cleanup;
+
+    /* create the domain if it doesn't exist already */
+    if (def->uuid == NULL ||
+            (domain = hyperv1DomainLookupByUUID(conn, def->uuid)) == NULL) {
+        /* Prepare params. edit only vm name for now */
+        embedded_param.nbProps = 1;
+        if (VIR_ALLOC_N(tab_props, embedded_param.nbProps) < 0)
+            goto cleanup;
+
+        tab_props[0].name = "ElementName";
+        tab_props[0].val = def->name;
+        embedded_param.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+        embedded_param.prop_t = tab_props;
+
+        /* Create XML params for method invocation */
+        nb_params = 1;
+        if (VIR_ALLOC_N(params, nb_params) < 0)
+            goto cleanup;
+        params[0].name = "SystemSettingData";
+        params[0].type = EMBEDDED_PARAM;
+        params[0].param = &embedded_param;
+
+        /* Actually invoke the method to create the VM */
+        if (hyperv1InvokeMethod(priv, params, nb_params, "DefineVirtualSystem",
+                    MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                    selector) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not create new domain %s"), def->name);
+            goto cleanup;
+        }
+
+        /* populate a domain ptr so that we can edit it */
+        domain = hyperv1DomainLookupByName(conn, def->name);
+
+        VIR_DEBUG("Domain created! name: %s, uuid: %s",
+                domain->name, virUUIDFormat(domain->uuid, uuid_string));
+    }
+
+cleanup:
+    virDomainDefFree(def);
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    return domain;
 }
 
 int

@@ -59,6 +59,8 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->nodeGetInfo = hyperv1NodeGetInfo; /* 0.9.5 */
     d->connectListDomains = hyperv1ConnectListDomains; /* 0.9.5 */
     d->connectNumOfDomains = hyperv1ConnectNumOfDomains; /* 0.9.5 */
+    d->domainCreateXML = hyperv1DomainCreateXML; /* TODO: get current version */
+    d->domainDefineXML = hyperv1DomainDefineXML; /* TODO: get current version */
     d->connectListAllDomains = hyperv1ConnectListAllDomains; /* 0.10.2 */
     d->domainLookupByID = hyperv1DomainLookupByID; /* 0.9.5 */
     d->domainLookupByUUID = hyperv1DomainLookupByUUID; /* 0.9.5 */
@@ -222,6 +224,9 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     }
 
     hypervSetupV1(&hypervHypervisorDriver, priv);
+
+    /* init xmlopt for domain XML */
+    priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
 
     conn->privateData = priv;
     priv = NULL;
