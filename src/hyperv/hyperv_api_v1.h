@@ -59,6 +59,7 @@ char *hyperv1DomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED);
 int hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info);
 int hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
         unsigned int flags);
+int hyperv1DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
         unsigned char *cpumaps, int maplen);
 char *hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags);
