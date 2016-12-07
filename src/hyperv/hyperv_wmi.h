@@ -56,6 +56,58 @@ typedef struct cimClasses CimClasses;
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Method
+ */
+
+enum _PARAM_type {
+    SIMPLE_PARAM = 0,
+    EPR_PARAM = 1,
+    EMBEDDED_PARAM = 2
+};
+
+typedef struct _invokeXmlParam invokeXmlParam;
+struct _invokeXmlParam {
+    const char *name;
+    int type;
+    void *param;
+};
+
+typedef struct _eprParam eprParam;
+struct _eprParam {
+    virBufferPtr query;
+    const char *wmiProviderURI;
+};
+
+typedef struct _simpleParam simpleParam;
+struct _simpleParam {
+    const char *value;
+};
+
+typedef struct _properties_t properties_t;
+struct _properties_t {
+    const char *name;
+    const char *val;
+};
+
+typedef struct _embedded_param embeddedParam;
+struct _embedded_param {
+    const char *instanceName;
+    properties_t *prop_t;
+    int nbProps;
+};
+
+int hypervCreateXmlStruct(const char *methodName, const char *classURI,
+        WsXmlDocH *xmlDocRoot, WsXmlNodeH *xmlNodeMethod);
+int hypervAddSimpleParam(const char *paramName, const char *value,
+        const char *classURI, WsXmlNodeH *parentNode);
+int hypervAddEprParam(const char *paramName, virBufferPtr query,
+        const char *root, const char *classURI, WsXmlNodeH *parentNode,
+        WsXmlDocH doc, hypervPrivate *priv);
+int hypervAddEmbeddedParam(properties_t *prop_t, int nbProps,
+        const char *paramName, const char *instanceName, const char *classURI,
+        WsXmlNodeH *parentNode);
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Object
  */
 

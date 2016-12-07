@@ -23,6 +23,7 @@
  */
 
 #include <config.h>
+#include <wsman-soap.h>
 
 #include "internal.h"
 #include "virerror.h"
@@ -33,6 +34,7 @@
 #include "hyperv_private.h"
 #include "hyperv_wmi.h"
 #include "virstring.h"
+#include "hyperv_wmi_cimtypes.generated.h"
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
@@ -100,7 +102,405 @@ hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
     return 0;
 }
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Method
+ */
 
+/* Methods to deal with building and invoking WMI methods over SOAP */
+
+/* create xml struct */
+int
+hypervCreateXmlStruct(const char *methodName, const char *classURI,
+        WsXmlDocH *xmlDocRoot, WsXmlNodeH *xmlNodeMethod)
+{
+    virBuffer method_buf = VIR_BUFFER_INITIALIZER;
+    char *methodNameInput = NULL;
+
+    virBufferAsprintf(&method_buf, "%s_INPUT", methodName);
+    methodNameInput = virBufferContentAndReset(&method_buf);
+
+    if (!methodNameInput) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not create XML document"));
+        goto cleanup;
+    }
+
+    *xmlDocRoot = ws_xml_create_doc(NULL, methodNameInput);
+    if (*xmlDocRoot == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not create XML doc with given parameter xmlDocRoot"));
+        goto cleanup;
+    }
+
+    *xmlNodeMethod = xml_parser_get_root(*xmlDocRoot);
+    if (*xmlNodeMethod == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not get xmlDocRoot root node"));
+        goto cleanup;
+    }
+
+    /* Add namespace to xmlNodeMethod */
+    ws_xml_set_ns(*xmlNodeMethod, classURI, "p");
+
+    VIR_FREE(methodNameInput);
+    return 0;
+
+cleanup:
+    virBufferFreeAndReset(&method_buf);
+    VIR_FREE(methodNameInput);
+    if (*xmlDocRoot != NULL) {
+        ws_xml_destroy_doc(*xmlDocRoot);
+        *xmlDocRoot = NULL;
+    }
+    return -1;
+}
+
+/* determines whether property class type is array and sets output values
+ * accordingly.
+ */
+static int
+hypervGetPropType(const char *className, const char *propName,
+        const char **propType, bool *isArray)
+{
+    int i, y;
+
+    i = 0;
+    while (cimClasses[i].name[0] != '\0') {
+        if (STREQ(cimClasses[i].name, className)) {
+            y = 0;
+            while (cimClasses[i].cimTypesPtr[y].name[0] != '\0') {
+                if (STREQ(cimClasses[i].cimTypesPtr[y].name, propName)) {
+                    *propType = cimClasses[i].cimTypesPtr[y].type;
+                    *isArray = cimClasses[i].cimTypesPtr[y].isArray;
+                    return 0;
+                }
+                y++;
+            }
+            break;
+        }
+        i++;
+    }
+
+    return -1;
+}
+
+/* Add a SIMPLE type param node to the parent node passed in */
+int
+hypervAddSimpleParam(const char *paramName, const char *value,
+        const char *classURI, WsXmlNodeH *parentNode)
+{
+    int result = -1;
+    WsXmlNodeH xmlNodeParam = NULL;
+
+    xmlNodeParam = ws_xml_add_child(*parentNode, classURI, paramName, value);
+    if (xmlNodeParam == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not create simple param"));
+        goto cleanup;
+    }
+    result = 0;
+
+cleanup:
+    return result;
+}
+
+/* Add an EPR param to the parent node passed in */
+int
+hypervAddEprParam(const char *paramName, virBufferPtr query, const char *root,
+        const char *classURI, WsXmlNodeH *parentNode, WsXmlDocH doc,
+        hypervPrivate *priv)
+{
+    int result = -1;
+    WsXmlNodeH xmlNodeParam = NULL,
+               xmlNodeTemp = NULL,
+               xmlNodeAddr = NULL,
+               xmlNodeRef = NULL;
+    xmlNodePtr xmlNodeAddrPtr = NULL,
+               xmlNodeRefPtr = NULL;
+    WsXmlDocH xmlDocResponse = NULL;
+    xmlDocPtr docPtr = (xmlDocPtr) doc->parserDoc;
+    WsXmlNsH ns = NULL;
+    client_opt_t *options = NULL;
+    filter_t *filter = NULL;
+    char *enumContext = NULL;
+    char *query_string = NULL;
+
+    /* get options */
+    options = wsmc_options_init();
+
+    if (!options) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not init options"));
+        goto cleanup;
+    }
+
+    wsmc_set_action_option(options, FLAG_ENUMERATION_ENUM_EPR);
+
+    /* Get query and create filter based on it */
+    query_string = virBufferContentAndReset(query);
+    filter = filter_create_simple(WSM_WQL_FILTER_DIALECT, query_string);
+    if (!filter) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not create filter"));
+        goto cleanup;
+    }
+
+    /* Enumerate based on the filter from the query */
+    xmlDocResponse = wsmc_action_enumerate(priv->client, root, options, filter);
+
+    if (hyperyVerifyResponse(priv->client, xmlDocResponse, "enumeration") < 0)
+        goto cleanup;
+
+    /* Get context from response */
+    enumContext = wsmc_get_enum_context(xmlDocResponse);
+    ws_xml_destroy_doc(xmlDocResponse);
+
+    /* Pull using filter and enum context */
+    xmlDocResponse = wsmc_action_pull(priv->client, classURI, options, filter,
+            enumContext);
+
+    if (hyperyVerifyResponse(priv->client, xmlDocResponse, "pull") < 0)
+        goto cleanup;
+
+    /* drill down and extract EPR node children */
+    if (!(xmlNodeTemp = ws_xml_get_soap_body(xmlDocResponse))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get SOAP body"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeTemp = ws_xml_get_child(xmlNodeTemp, 0, XML_NS_ENUMERATION,
+            WSENUM_PULL_RESP))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeTemp = ws_xml_get_child(xmlNodeTemp, 0, XML_NS_ENUMERATION, WSENUM_ITEMS))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response items"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeTemp = ws_xml_get_child(xmlNodeTemp, 0, XML_NS_ADDRESSING, WSA_EPR))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get EPR items"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeAddr = ws_xml_get_child(xmlNodeTemp, 0, XML_NS_ADDRESSING,
+                    WSA_ADDRESS))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get EPR address"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeAddrPtr = xmlDocCopyNode((xmlNodePtr) xmlNodeAddr, docPtr, 1))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not copy EPR address"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeRef = ws_xml_get_child(xmlNodeTemp, 0, XML_NS_ADDRESSING,
+            WSA_REFERENCE_PARAMETERS))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not lookup EPR item reference parameters"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeRefPtr = xmlDocCopyNode((xmlNodePtr) xmlNodeRef, docPtr, 1))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not copy EPR item reference parameters"));
+        goto cleanup;
+    }
+
+    /* we did it, now build a new xml doc with the EPR node children */
+    if (!(xmlNodeParam = ws_xml_add_child(*parentNode, classURI, paramName,
+                    NULL))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add child node to xmlNodeParam"));
+        goto cleanup;
+    }
+
+    if (!(ns = ws_xml_ns_add(xmlNodeParam,
+                    "http://schemas.xmlsoap.org/ws/2004/08/addressing", "a"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not set namespace address for xmlNodeParam"));
+        goto cleanup;
+    }
+
+    ns = NULL;
+    if (!(ns = ws_xml_ns_add(xmlNodeParam,
+                    "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd", "w"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not set wsman namespace address for xmlNodeParam"));
+        goto cleanup;
+    }
+
+    if (xmlAddChild((xmlNodePtr) *parentNode, (xmlNodePtr) xmlNodeParam) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add child to xml parent node"));
+        goto cleanup;
+    }
+
+    if (xmlAddChild((xmlNodePtr) *parentNode, xmlNodeAddrPtr) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add child to xml parent node"));
+        goto cleanup;
+    }
+
+    if (xmlAddChild((xmlNodePtr) *parentNode, xmlNodeRefPtr) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add child to xml parent node"));
+        goto cleanup;
+    }
+
+    /* we did it! */
+    result = 0;
+
+cleanup:
+    if (options != NULL) {
+        wsmc_options_destroy(options);
+    }
+    if (filter != NULL) {
+        filter_destroy(filter);
+    }
+    ws_xml_destroy_doc(xmlDocResponse);
+    VIR_FREE(enumContext);
+    VIR_FREE(query_string);
+    return result;
+}
+
+/* Add an embedded param to the parent node passed in */
+int
+hypervAddEmbeddedParam(properties_t *prop_t, int nbProps, const char *paramName,
+        const char *instanceName, const char *classURI, WsXmlNodeH *parentNode)
+{
+    int result = -1;
+    WsXmlNodeH xmlNodeInstance = NULL,
+               xmlNodeProperty = NULL,
+               xmlNodeParam = NULL,
+               xmlNodeArray = NULL;
+    WsXmlDocH xmlDocTemp = NULL,
+              xmlDocCdata = NULL;
+    xmlBufferPtr xmlBufferNode = NULL;
+    const xmlChar *xmlCharCdataContent = NULL;
+    xmlNodePtr xmlNodeCdata = NULL;
+    const char *type = NULL;
+    bool isArray = false;
+    int len = 0, i = 0;
+
+    /* Add child to the parent */
+    if (!(xmlNodeParam = ws_xml_add_child(*parentNode, classURI, paramName, NULL))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "Could not add child node %s",
+                paramName);
+        goto cleanup;
+    }
+
+    /* create the temp xml doc */
+
+    /* start with the INSTANCE node */
+    if (!(xmlDocTemp = ws_xml_create_doc(NULL, "INSTANCE"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not create temporary xml doc"));
+        goto cleanup;
+    }
+
+    if (!(xmlNodeInstance = xml_parser_get_root(xmlDocTemp))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not get temp xml doc root"));
+        goto cleanup;
+    }
+
+    /* add CLASSNAME node to INSTANCE node */
+    if (ws_xml_add_node_attr(xmlNodeInstance, NULL, "CLASSNAME",
+                instanceName) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add attribute to node"));
+        goto cleanup;
+    }
+
+    for (i = 0; i < nbProps; i++) {
+        if (prop_t[i].name == NULL && prop_t[i].val == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not get properties from array"));
+            goto cleanup;
+        }
+
+        if (hypervGetPropType(instanceName, prop_t[i].name, &type, &isArray) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not get properties from array"));
+            goto cleanup;
+        }
+
+        if (!(xmlNodeProperty = ws_xml_add_child(xmlNodeInstance, NULL,
+                        isArray ? "PROPERTY.ARRAY" : "PROPERTY", NULL))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not add child to node"));
+            goto cleanup;
+        }
+
+        if (ws_xml_add_node_attr(xmlNodeProperty, NULL, "NAME", prop_t[i].name) == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not add attribute to node"));
+            goto cleanup;
+        }
+
+        if (ws_xml_add_node_attr(xmlNodeProperty, NULL, "TYPE", type) == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not add attribute to node"));
+            goto cleanup;
+        }
+
+        /* If this attribute is an array, add the VALUE.ARARY node */
+        if (isArray) {
+            if (!(xmlNodeArray = ws_xml_add_child(xmlNodeProperty, NULL,
+                            "VALUE.ARRAY", NULL))) {
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("Could not add child to node"));
+                goto cleanup;
+            }
+        }
+
+        /* add the child */
+        if (ws_xml_add_child(isArray ? xmlNodeArray : xmlNodeProperty, NULL,
+                    "VALUE", prop_t[i].val) == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not add child to node"));
+            goto cleanup;
+        }
+
+        xmlNodeArray = NULL;
+        xmlNodeProperty = NULL;
+    }
+
+    /* create CDATA node */
+    xmlBufferNode = xmlBufferCreate();
+    if (xmlNodeDump(xmlBufferNode, (xmlDocPtr) xmlDocTemp->parserDoc,
+                (xmlNodePtr) xmlNodeInstance, 0, 0) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not get root of temp xml doc"));
+        goto cleanup;
+    }
+
+    len = xmlBufferLength(xmlBufferNode);
+    xmlCharCdataContent = xmlBufferContent(xmlBufferNode);
+    if (!(xmlNodeCdata = xmlNewCDataBlock((xmlDocPtr) xmlDocCdata,
+                    xmlCharCdataContent, len))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not make CDATA"));
+        goto cleanup;
+    }
+
+    /* Add CDATA node to the doc root */
+    if (xmlAddChild((xmlNodePtr) xmlNodeParam, xmlNodeCdata) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not add CDATA to doc root"));
+        goto cleanup;
+    }
+
+    /* we did it! */
+    result = 0;
+
+cleanup:
+    ws_xml_destroy_doc(xmlDocCdata);
+    ws_xml_destroy_doc(xmlDocTemp);
+    if (!xmlBufferNode) {
+        xmlBufferFree(xmlBufferNode);
+    }
+    return result;
+}
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Object
