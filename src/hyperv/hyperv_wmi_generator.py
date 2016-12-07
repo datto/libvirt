@@ -150,6 +150,26 @@ class Class:
         return source
 
 
+    def generate_cimtypes_header_body(self):
+        header = separator
+        header += " * %s\n" % self.name
+        header += " */\n"
+        header += "\n"
+        header += "CimTypes cimTypes_%s[] = {\n" % self.name
+        for property in self.properties:
+            header += property.generate_cimtype_property()
+            header += ",\n"
+        header += '    { "", "", 0 },\n};\n\n'
+        return header
+
+    def generate_cimtypes_cimclasses(self):
+        header = "    { \"%s" % self.name
+        header += "\", cimTypes_%s" % self.name
+        header += " },\n"
+
+        return header
+
+
 class Property:
     typemap = {"boolean"  : "BOOL",
                "string"   : "STR",
@@ -188,6 +208,20 @@ class Property:
         else:
             return "    SER_NS_%s(%s_RESOURCE_URI, \"%s\", 1),\n" \
                    % (Property.typemap[self.type], class_name.upper(), self.name)
+
+
+
+    def generate_cimtype_property(self):
+        header = '    { "%s' % self.name
+        header += '", "%s", ' % self.type
+        if self.is_array:
+            header += "true"
+        else:
+            header += "false"
+        header += " }"
+        return header
+
+
 
 
 
@@ -239,6 +273,10 @@ def parse_class(block):
     return Class(name=name, properties=properties)
 
 
+def generate_cimtypes_header_header():
+    return '#include "hyperv_wmi.h"\n'
+
+
 
 def main():
     if "srcdir" in os.environ:
@@ -253,6 +291,7 @@ def main():
     classes_typedef = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.typedef"))
     classes_header = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.h"))
     classes_source = open_and_print(os.path.join(output_dirname, "hyperv_wmi_classes.generated.c"))
+    cimtypes_header = open_and_print(os.path.join(output_dirname, "hyperv_wmi_cimtypes.generated.h"))
 
     # parse input file
     number = 0
@@ -294,6 +333,9 @@ def main():
     classes_typedef.write(notice)
     classes_header.write(notice)
     classes_source.write(notice)
+    cimtypes_header.write(notice)
+
+    cimtypes_header.write(generate_cimtypes_header_header())
 
     names = classes_by_name.keys()
     names.sort()
@@ -304,8 +346,12 @@ def main():
         classes_typedef.write(classes_by_name[name].generate_classes_typedef())
         classes_header.write(classes_by_name[name].generate_classes_header())
         classes_source.write(classes_by_name[name].generate_classes_source())
+        cimtypes_header.write(classes_by_name[name].generate_cimtypes_header_body())
 
-
+    cimtypes_header.write("CimClasses cimClasses[] = {\n")
+    for name in names:
+        cimtypes_header.write(classes_by_name[name].generate_cimtypes_cimclasses())
+    cimtypes_header.write('    { "", NULL },\n};\n')
 
 if __name__ == "__main__":
     main()
