@@ -37,6 +37,23 @@ int hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
                          const char *detail);
 
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * CimTypes
+ */
+
+struct cimTypes {
+        const char *name;
+        const char *type;
+        bool isArray;
+};
+typedef struct cimTypes CimTypes;
+
+struct cimClasses {
+        const char *name;
+        CimTypes *cimTypesPtr;
+};
+typedef struct cimClasses CimClasses;
+
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Object
