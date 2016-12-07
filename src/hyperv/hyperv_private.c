@@ -45,6 +45,10 @@ hypervFreePrivate(hypervPrivate **priv)
         virObjectUnref((*priv)->caps);
     }
 
+    if ((*priv)->xmlopt != NULL) {
+        virObjectUnref((*priv)->xmlopt);
+    }
+
     hypervFreeParsedUri(&(*priv)->parsedUri);
     VIR_FREE(*priv);
 }

@@ -45,9 +45,12 @@ int hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNU
 int hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info);
 int hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids);
 int hyperv1ConnectNumOfDomains(virConnectPtr conn);
+virDomainPtr hyperv1DomainCreateXML(virConnectPtr conn, const char *xmlDesc,
+        unsigned int flags);
 virDomainPtr hyperv1DomainLookupByID(virConnectPtr conn, int id);
 virDomainPtr hyperv1DomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid);
 virDomainPtr hyperv1DomainLookupByName(virConnectPtr conn, const char *name);
+virDomainPtr hyperv1DomainDefineXML(virConnectPtr conn, const char *xml);
 int hyperv1DomainSuspend(virDomainPtr domain);
 int hyperv1DomainResume(virDomainPtr domain);
 int hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags);
