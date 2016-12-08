@@ -1003,6 +1003,59 @@ hyperv1DomainResume(virDomainPtr domain)
 }
 
 int
+hyperv1DomainShutdown(virDomainPtr domain)
+{
+    return hyperv1DomainShutdownFlags(domain, 0);
+}
+
+int
+hyperv1DomainShutdownFlags(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    bool in_transition = false;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    if (!hypervIsMsvmComputerSystemActive(computerSystem, &in_transition) || in_transition) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                _("Domain is not active or in state transition"));
+        goto cleanup;
+    }
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange(domain,
+            MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    return result;
+}
+
+int
+hyperv1DomainReboot(virDomainPtr domain, unsigned int flags)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+
+    virCheckFlags(0, -1);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    result = hypervInvokeMsvmComputerSystemRequestStateChange(domain,
+            MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_REBOOT);
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    return result;
+}
+
+int
 hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
