@@ -67,6 +67,9 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainLookupByName = hyperv1DomainLookupByName; /* 0.9.5 */
     d->domainSuspend = hyperv1DomainSuspend; /* 0.9.5 */
     d->domainResume = hyperv1DomainResume; /* 0.9.5 */
+    d->domainShutdown = hyperv1DomainShutdown; /* TODO: get current version */
+    d->domainShutdownFlags = hyperv1DomainShutdownFlags; /* TODO: get current version */
+    d->domainReboot = hyperv1DomainReboot; /* TODO: get current version */
     d->domainDestroy = hyperv1DomainDestroy; /* 0.9.5 */
     d->domainDestroyFlags = hyperv1DomainDestroyFlags; /* 0.9.5 */
     d->domainGetOSType = hyperv1DomainGetOSType; /* 0.9.5 */
