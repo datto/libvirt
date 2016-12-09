@@ -50,6 +50,8 @@ char *virStringGetFirstWithPrefix(char **strings, const char *prefix)
 
 char *virArgvToString(const char *const *argv);
 
+char *virNumToStr(unsigned long num);
+
 int virStrToLong_i(char const *s,
                    char **end_ptr,
                    int base,
