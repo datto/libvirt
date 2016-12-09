@@ -29,7 +29,11 @@
 # include "hyperv_wmi_classes.h"
 # include "openwsman.h"
 
+#define ROOT_CIMV2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
 
+#define ROOT_VIRTUALIZATION \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
 
 typedef struct _hypervObject hypervObject;
 

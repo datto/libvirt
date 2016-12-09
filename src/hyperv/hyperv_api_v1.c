@@ -1191,6 +1191,88 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
 }
 
 int
+hyperv1DomainSetVcpus(virDomainPtr domain, unsigned int nvcpus)
+{
+    return hyperv1DomainSetVcpusFlags(domain, nvcpus, 0);
+}
+
+int
+hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
+        unsigned int flags)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ProcessorSettingData *proc_sd = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+    eprParam eprparam;
+    embeddedParam embeddedparam;
+    properties_t *tab_props;
+    invokeXmlParam *params = NULL;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    char *nvcpus_str = NULL;
+
+    /* Convert nvcpus into a string value */
+    nvcpus_str = virNumToStr(nvcpus);
+    if (!nvcpus_str)
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0) {
+        goto cleanup;
+    }
+
+    if (hyperv1GetProcSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &proc_sd) < 0) {
+        goto cleanup;
+    }
+
+    /* prepare parameters */
+    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&buf, "where Name = \"%s\"", uuid_string);
+    eprparam.query = &buf;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    tab_props[0].name = "VirtualQuantity";
+    tab_props[0].val = nvcpus_str;
+    tab_props[1].name = "InstanceID";
+    tab_props[1].val = proc_sd->data->InstanceID;
+    embeddedparam.instanceName = "Msvm_ProcessorSettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* prepare and invoke method */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector) < 0)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    VIR_FREE(nvcpus_str);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) proc_sd);
+    virBufferFreeAndReset(&buf);
+    return result;
+}
+
+int
 hyperv1DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
@@ -1596,6 +1678,13 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
 
         VIR_DEBUG("Domain created! name: %s, uuid: %s",
                 domain->name, virUUIDFormat(domain->uuid, uuid_string));
+    }
+
+    /* set domain vcpus */
+    if (def->vcpus) {
+        if (hyperv1DomainSetVcpus(domain, def->maxvcpus) < 0)
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not set VM vCPUs"));
     }
 
 cleanup:

@@ -75,6 +75,8 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainGetOSType = hyperv1DomainGetOSType; /* 0.9.5 */
     d->domainGetInfo = hyperv1DomainGetInfo; /* 0.9.5 */
     d->domainGetState = hyperv1DomainGetState; /* 0.9.5 */
+    d->domainSetVcpus = hyperv1DomainSetVcpus; /* TODO: get current version */
+    d->domainSetVcpusFlags = hyperv1DomainSetVcpusFlags; /* TODO: get current version */
     d->domainGetVcpusFlags = hyperv1DomainGetVcpusFlags; /* TODO: get current version */
     d->domainGetVcpus = hyperv1DomainGetVcpus; /* TODO: Get current version */
     d->domainGetMaxVcpus = hyperv1DomainGetMaxVcpus; /* TODO: get current version */
