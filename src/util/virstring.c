@@ -751,6 +751,20 @@ virArgvToString(const char *const *argv)
     return ret;
 }
 
+char *
+virNumToStr(unsigned long num)
+{
+    int sz;
+    char *result = NULL;
+
+    sz = snprintf(NULL, 0, "%lu", num);
+    if (VIR_ALLOC_N(result, sz + 1) < 0)
+        return NULL;
+
+    sprintf(result, "%lu", num);
+    return result;
+}
+
 /**
  * virStrdup:
  * @dest: where to store duplicated string
