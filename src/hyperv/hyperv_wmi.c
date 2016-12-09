@@ -335,13 +335,13 @@ hypervAddEprParam(const char *paramName, virBufferPtr query, const char *root,
         goto cleanup;
     }
 
-    if (xmlAddChild((xmlNodePtr) *parentNode, xmlNodeAddrPtr) == NULL) {
+    if (xmlAddChild((xmlNodePtr) xmlNodeParam, xmlNodeAddrPtr) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not add child to xml parent node"));
         goto cleanup;
     }
 
-    if (xmlAddChild((xmlNodePtr) *parentNode, xmlNodeRefPtr) == NULL) {
+    if (xmlAddChild((xmlNodePtr) xmlNodeParam, xmlNodeRefPtr) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not add child to xml parent node"));
         goto cleanup;
