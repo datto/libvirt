@@ -73,6 +73,10 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainDestroy = hyperv1DomainDestroy; /* 0.9.5 */
     d->domainDestroyFlags = hyperv1DomainDestroyFlags; /* 0.9.5 */
     d->domainGetOSType = hyperv1DomainGetOSType; /* 0.9.5 */
+    d->domainGetMaxMemory = hyperv1DomainGetMaxMemory; /* TODO: get current version */
+    d->domainSetMaxMemory = hyperv1DomainSetMaxMemory; /* TODO: get current version */
+    d->domainSetMemory = hyperv1DomainSetMemory; /* TODO: get current version */
+    d->domainSetMemoryFlags = hyperv1DomainSetMemoryFlags; /* TODO: get current version */
     d->domainGetInfo = hyperv1DomainGetInfo; /* 0.9.5 */
     d->domainGetState = hyperv1DomainGetState; /* 0.9.5 */
     d->domainSetVcpus = hyperv1DomainSetVcpus; /* TODO: get current version */

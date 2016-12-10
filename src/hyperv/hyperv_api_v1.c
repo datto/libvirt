@@ -1098,6 +1098,200 @@ hyperv1DomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED)
     return osType;
 }
 
+unsigned long long
+hyperv1DomainGetMaxMemory(virDomainPtr domain)
+{
+    unsigned long long result = 0;
+    bool success = false;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_MemorySettingData *mem_sd = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* get all the data we need */
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetMemSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &mem_sd) < 0)
+        goto cleanup;
+
+    result = mem_sd->data->Limit;
+
+    result = result * 1024; /* convert mb to bytes */
+    success = true;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) mem_sd);
+
+    return success ? result : 512; /* default to 512 on failure */
+}
+
+int
+hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    invokeXmlParam *params = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+    properties_t *tab_props = NULL;
+    eprParam eprparam;
+    embeddedParam embeddedparam;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_MemorySettingData *mem_sd = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    char *memory_str = NULL;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+
+    unsigned long memory_mb = memory / 1024;
+
+    /* memory has to be multiple of 2 mb; round up if necessary */
+    if (memory_mb % 2) memory_mb++;
+
+    if (!(memory_str = virNumToStr(memory_mb)))
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* get all the data we need */
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetMemSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &mem_sd) < 0)
+        goto cleanup;
+
+    /* prepare EMBEDDED param */
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    tab_props[0].name = "Limit";
+    tab_props[0].val = memory_str;
+    tab_props[1].name = "InstanceID";
+    tab_props[1].val = mem_sd->data->InstanceID;
+    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* set up invokeXmlParam */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+        MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+
+cleanup:
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    VIR_FREE(memory_str);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) mem_sd);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+int
+hyperv1DomainSetMemory(virDomainPtr domain, unsigned long memory)
+{
+    return hyperv1DomainSetMemoryFlags(domain, memory, 0);
+}
+
+int
+hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
+        unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    invokeXmlParam *params = NULL;
+    properties_t *tab_props = NULL;
+    eprParam eprparam;
+    embeddedParam embeddedparam;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_MemorySettingData *mem_sd = NULL;
+    char *memory_str = NULL;
+
+    /* memory has to passed as a multiple of 2mb */
+    unsigned long memory_mb = memory / 1024;
+    if (memory_mb % 2) memory_mb++;
+
+    if (!(memory_str = virNumToStr(memory_mb)))
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* get all the data we need */
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetMemSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &mem_sd) < 0)
+        goto cleanup;
+
+    /* prepare EMBEDDED param */
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    tab_props[0].name = "VirtualQuantity";
+    tab_props[0].val = memory_str;
+    tab_props[1].name = "InstanceID";
+    tab_props[1].val = mem_sd->data->InstanceID;
+    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* set up invokeXmlParam */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not set domain memory"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    VIR_FREE(memory_str);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) mem_sd);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
 int
 hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
 {
@@ -1198,7 +1392,7 @@ hyperv1DomainSetVcpus(virDomainPtr domain, unsigned int nvcpus)
 
 int
 hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
-        unsigned int flags)
+        unsigned int flags ATTRIBUTE_UNUSED)
 {
     int result = -1;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
@@ -1685,6 +1879,22 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         if (hyperv1DomainSetVcpus(domain, def->maxvcpus) < 0)
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                     _("Could not set VM vCPUs"));
+    }
+
+    /* Set VM maximum memory */
+    if (def->mem.max_memory > 0) {
+        if (hyperv1DomainSetMaxMemory(domain, def->mem.max_memory) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not set VM maximum memory"));
+        }
+    }
+
+    /* Set VM memory */
+    if (def->mem.cur_balloon > 0) {
+        if (hyperv1DomainSetMemory(domain, def->mem.cur_balloon) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not set VM memory"));
+        }
     }
 
 cleanup:
