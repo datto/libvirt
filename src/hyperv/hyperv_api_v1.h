@@ -59,6 +59,11 @@ int hyperv1DomainReboot(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainDestroy(virDomainPtr domain);
 char *hyperv1DomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED);
+unsigned long long hyperv1DomainGetMaxMemory(virDomainPtr domain);
+int hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory);
+int hyperv1DomainSetMemory(virDomainPtr domain, unsigned long memory);
+int hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
+        unsigned int flags);
 int hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info);
 int hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
         unsigned int flags);
