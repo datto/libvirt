@@ -90,6 +90,9 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
     d->domainCreate = hyperv1DomainCreate; /* 0.9.5 */
     d->domainCreateWithFlags = hyperv1DomainCreateWithFlags; /* 0.9.5 */
+    d->domainGetSchedulerType = hyperv1DomainGetSchedulerType; /* TODO: get current version */
+    d->domainGetSchedulerParameters = hyperv1DomainGetSchedulerParameters; /* TODO: get current version */
+    d->domainGetSchedulerParametersFlags = hyperv1DomainGetSchedulerParametersFlags; /* TODO: get current version */
     d->domainIsActive = hyperv1DomainIsActive;
     d->domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
     d->domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */

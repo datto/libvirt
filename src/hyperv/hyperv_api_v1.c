@@ -1904,6 +1904,93 @@ cleanup:
     return domain;
 }
 
+char *
+hyperv1DomainGetSchedulerType(virDomainPtr domain ATTRIBUTE_UNUSED, int *nparams)
+{
+    char *type;
+
+    if (VIR_STRDUP(type, "allocation") < 0) {
+        virReportOOMError();
+        return NULL;
+    }
+
+    if (!nparams)
+        *nparams = 3; /* reservation, limit, weight */
+
+    return type;
+}
+
+int
+hyperv1DomainGetSchedulerParameters(virDomainPtr domain,
+        virTypedParameterPtr params, int *nparams)
+{
+    return hyperv1DomainGetSchedulerParametersFlags(domain, params, nparams,
+            VIR_DOMAIN_AFFECT_CURRENT);
+}
+
+int
+hyperv1DomainGetSchedulerParametersFlags(virDomainPtr domain,
+        virTypedParameterPtr params, int *nparams, unsigned int flags)
+{
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ProcessorSettingData *proc_sd = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    int saved_nparams = 0;
+    int result = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG |
+                  VIR_TYPED_PARAM_STRING_OKAY, -1);
+
+    /* we don't return strings */
+    flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* get info from host */
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetProcSDByVSSDInstanceId(priv, vssd->data->InstanceID,
+                &proc_sd) < 0)
+        goto cleanup;
+
+    /* parse it all out */
+    if (virTypedParameterAssign(&params[0], VIR_DOMAIN_SCHEDULER_LIMIT,
+                                VIR_TYPED_PARAM_LLONG, proc_sd->data->Limit) < 0)
+        goto cleanup;
+    saved_nparams++;
+
+    if (*nparams > saved_nparams) {
+        if (virTypedParameterAssign(&params[1],VIR_DOMAIN_SCHEDULER_RESERVATION,
+                                    VIR_TYPED_PARAM_LLONG, proc_sd->data->Reservation) < 0)
+            goto cleanup;
+        saved_nparams++;
+    }
+
+    if (*nparams > saved_nparams) {
+        if (virTypedParameterAssign(&params[2],VIR_DOMAIN_SCHEDULER_WEIGHT,
+                                    VIR_TYPED_PARAM_UINT, proc_sd->data->Weight) < 0)
+            goto cleanup;
+        saved_nparams++;
+    }
+
+    *nparams = saved_nparams;
+
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) proc_sd);
+    return result;
+}
+
 int
 hyperv1DomainIsActive(virDomainPtr domain)
 {
