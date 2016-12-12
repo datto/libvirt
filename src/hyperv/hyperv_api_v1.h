@@ -75,12 +75,13 @@ int hyperv1DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
         unsigned char *cpumaps, int maplen);
 int hyperv1DomainGetMaxVcpus(virDomainPtr dom);
 char *hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags);
-int hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart);
 int hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
         int maxnames);
 int hyperv1ConnectNumOfDefinedDomains(virConnectPtr conn);
 int hyperv1DomainCreateWithFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainCreate(virDomainPtr domain);
+int hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart);
+int hyperv1DomainSetAutostart(virDomainPtr domain, int autostart);
 char *hyperv1DomainGetSchedulerType(virDomainPtr domain, int *nparams);
 int hyperv1DomainGetSchedulerParameters(virDomainPtr domain,
         virTypedParameterPtr params, int *nparams);

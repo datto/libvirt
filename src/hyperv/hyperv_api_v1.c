@@ -1691,31 +1691,6 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 }
 
 int
-hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
-{
-    int result = -1;
-    char uuid_string[VIR_UUID_STRING_BUFLEN];
-    hypervPrivate *priv = domain->conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSystemGlobalSettingData *vsgsd = NULL;
-
-    virUUIDFormat(domain->uuid, uuid_string);
-    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_WQL_SELECT);
-    virBufferAsprintf(&query, "where SystemName = \"%s\"", uuid_string);
-
-    if (hypervGetMsvmVirtualSystemGlobalSettingDataList(priv, &query, &vsgsd) < 0)
-        goto cleanup;
-
-    *autostart = vsgsd->data->AutomaticStartupAction;
-    result = 0;
-
-cleanup:
-    hypervFreeObject(priv, (hypervObject *) vsgsd);
-    virBufferFreeAndReset(&query);
-    return result;
-}
-
-int
 hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
         int maxnames)
 {
@@ -1903,6 +1878,93 @@ cleanup:
     VIR_FREE(params);
     return domain;
 }
+
+int
+hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_VirtualSystemGlobalSettingData *vsgsd = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+
+    virUUIDFormat(domain->uuid, uuid_string);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_WQL_SELECT);
+    virBufferAsprintf(&query, "where SystemName = \"%s\"", uuid_string);
+
+    if (hypervGetMsvmVirtualSystemGlobalSettingDataList(priv, &query,
+                &vsgsd) < 0)
+        goto cleanup;
+
+    *autostart = vsgsd->data->AutomaticStartupAction;
+    result = 0;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) vsgsd);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+int
+hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
+{
+    int result = -1;
+    invokeXmlParam *params = NULL;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    properties_t *tab_props = NULL;
+    eprParam eprparam;
+    embeddedParam embeddedparam;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* Prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* prepare embedded param */
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    embeddedparam.nbProps = 2;
+    if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    tab_props[0].name = "AutomaticStartupAction";
+    tab_props[0].val = autostart ? "2" : "0";
+    tab_props[1].name = "InstanceID";
+    tab_props[1].val = vssd->data->InstanceID;
+
+    embeddedparam.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+    embeddedparam.prop_t = tab_props;
+
+    /* set up and invoke method */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+    params[1].name = "SystemSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystem",
+            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    VIR_FREE(tab_props);
+    VIR_FREE(params);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
 
 char *
 hyperv1DomainGetSchedulerType(virDomainPtr domain ATTRIBUTE_UNUSED, int *nparams)

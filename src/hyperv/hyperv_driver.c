@@ -85,11 +85,12 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainGetVcpus = hyperv1DomainGetVcpus; /* TODO: Get current version */
     d->domainGetMaxVcpus = hyperv1DomainGetMaxVcpus; /* TODO: get current version */
     d->domainGetXMLDesc = hyperv1DomainGetXMLDesc; /* 0.9.5 */
-    d->domainGetAutostart = hyperv1DomainGetAutostart; /* TODO: get current version */
     d->connectListDefinedDomains = hyperv1ConnectListDefinedDomains; /* 0.9.5 */
     d->connectNumOfDefinedDomains = hyperv1ConnectNumOfDefinedDomains; /* 0.9.5 */
     d->domainCreate = hyperv1DomainCreate; /* 0.9.5 */
     d->domainCreateWithFlags = hyperv1DomainCreateWithFlags; /* 0.9.5 */
+    d->domainGetAutostart = hyperv1DomainGetAutostart; /* TODO: get current version */
+    d->domainSetAutostart = hyperv1DomainSetAutostart; /* TODO: get current version */
     d->domainGetSchedulerType = hyperv1DomainGetSchedulerType; /* TODO: get current version */
     d->domainGetSchedulerParameters = hyperv1DomainGetSchedulerParameters; /* TODO: get current version */
     d->domainGetSchedulerParametersFlags = hyperv1DomainGetSchedulerParametersFlags; /* TODO: get current version */
