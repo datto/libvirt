@@ -112,6 +112,14 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
             goto cleanup;
         }
 
+        /* Get Msvm_ConcreteJob object */
+        instanceID = ws_xml_get_xpath_value(response, xpath_expr_string);
+        if (!instanceID) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not look up instance ID for RequestStateChange invocation"));
+            goto cleanup;
+        }
+
         /* Poll every 100ms until the job completes or fails */
         while (!completed) {
             virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
