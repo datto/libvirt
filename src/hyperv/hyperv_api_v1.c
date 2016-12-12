@@ -1888,6 +1888,66 @@ cleanup:
 }
 
 int
+hyperv1DomainUndefine(virDomainPtr domain)
+{
+    return hyperv1DomainUndefineFlags(domain, 0);
+}
+
+int
+hyperv1DomainUndefineFlags(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    invokeXmlParam *params = NULL;
+    eprParam eprparam;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    virCheckFlags(0, -1);
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    /* try to shut down the VM if it's not disabled, just to be safe */
+    if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED) {
+        if (hyperv1DomainShutdown(domain) < 0)
+            goto cleanup;
+    }
+
+    /* prepare params */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    if (VIR_ALLOC_N(params, 1) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+
+    /* actually destroy the vm */
+    if (hyperv1InvokeMethod(priv, params, 1, "DestroyVirtualSystem",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not delete domain"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(params);
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+int
 hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
 {
     int result = -1;
