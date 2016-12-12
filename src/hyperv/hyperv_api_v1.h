@@ -51,6 +51,8 @@ virDomainPtr hyperv1DomainLookupByID(virConnectPtr conn, int id);
 virDomainPtr hyperv1DomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid);
 virDomainPtr hyperv1DomainLookupByName(virConnectPtr conn, const char *name);
 virDomainPtr hyperv1DomainDefineXML(virConnectPtr conn, const char *xml);
+int hyperv1DomainUndefine(virDomainPtr domain);
+int hyperv1DomainUndefineFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainSuspend(virDomainPtr domain);
 int hyperv1DomainResume(virDomainPtr domain);
 int hyperv1DomainShutdown(virDomainPtr domain);
