@@ -69,6 +69,8 @@ int hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
 int hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info);
 int hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
         unsigned int flags);
+char *hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
+        unsigned int screen, unsigned int flags);
 int hyperv1DomainSetVcpus(virDomainPtr domain, unsigned int nvcpus);
 int hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
         unsigned int flags);
