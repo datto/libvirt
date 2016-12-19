@@ -22,6 +22,7 @@
  */
 #include <config.h>
 #include <wsman-soap.h>
+#include <fcntl.h>
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -29,6 +30,7 @@
 
 #include "virlog.h"
 #include "virstring.h"
+#include "fdstream.h"
 
 #include "hyperv_driver.h"
 #include "hyperv_private.h"
@@ -45,7 +47,8 @@ VIR_LOG_INIT("hyperv.hyperv_api_v1")
  */
 static int
 hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
-        const char *methodName, const char *resourceURI, const char *selector)
+        const char *methodName, const char *resourceURI, const char *selector,
+        WsXmlDocH *res)
 {
     int result = -1;
     int returnCode;
@@ -169,12 +172,15 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
         goto cleanup;
     }
 
+    if (res != NULL)
+        *res = response;
+
     result = 0;
 
 cleanup:
     if (options)
         wsmc_options_destroy(options);
-    if (response)
+    if (response && (res == NULL))
         ws_xml_destroy_doc(response);
     VIR_FREE(returnValue);
     VIR_FREE(instanceID);
@@ -187,7 +193,8 @@ cleanup:
 
 static int
 hyperv1InvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParameters,
-        const char *methodName, const char *providerURI, const char *selector)
+        const char *methodName, const char *providerURI, const char *selector,
+        WsXmlDocH *res)
 {
     int result = -1;
     WsXmlDocH doc = NULL;
@@ -243,7 +250,8 @@ hyperv1InvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParamete
     }
 
     /* invoke the method */
-    if (hyperv1InvokeMethodXml(priv, doc, methodName, providerURI, selector) < 0) {
+    if (hyperv1InvokeMethodXml(priv, doc, methodName, providerURI, selector,
+                res) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Error during invocation action"));
         goto cleanup;
@@ -1201,7 +1209,7 @@ hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     params[1].param = &embeddedparam;
 
     result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-        MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+        MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL);
 
 cleanup:
     VIR_FREE(tab_props);
@@ -1283,7 +1291,7 @@ hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
 
     if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
-                selector) < 0) {
+                selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not set domain memory"));
         goto cleanup;
     }
@@ -1392,6 +1400,184 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
     return result;
 }
 
+char *
+hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
+        unsigned int screen ATTRIBUTE_UNUSED, unsigned int flags ATTRIBUTE_UNUSED)
+{
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VideoHead *heads = NULL;
+    Msvm_SyntheticDisplayController *ctrlr = NULL;
+    eprParam eprparam;
+    simpleParam x_param, y_param;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    invokeXmlParam *params;
+    WsXmlDocH ret_doc = NULL;
+    int xRes = 640;
+    int yRes = 480;
+    WsXmlNodeH envelope = NULL;
+    WsXmlNodeH body = NULL;
+    WsXmlNodeH thumbnail = NULL;
+    xmlNodePtr base = NULL;
+    xmlNodePtr child = NULL;
+    char *imageDataText = NULL;
+    char *imageDataBuffer = NULL;
+    char thumbnailFilename[VIR_UUID_STRING_BUFLEN + 26];
+    uint16_t *bufAs16 = NULL;
+    uint16_t px;
+    uint8_t *ppmBuffer = NULL;
+    uint8_t r, g, b;
+    char *result = NULL;
+    FILE *fd;
+    int childCount, pixelCount, i;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* get current resolution of VM */
+    virBufferAsprintf(&query, "select * from Msvm_SyntheticDisplayController "
+                              "where SystemName = \"%s\"", uuid_string);
+    if (hypervGetMsvmSyntheticDisplayControllerList(priv, &query, &ctrlr) < 0)
+        goto thumbnail;
+
+    if (ctrlr == NULL)
+        goto thumbnail;
+
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_SyntheticDisplayController."
+            "CreationClassName=\"Msvm_SyntheticDisplayController\","
+            "DeviceID=\"%s\","
+            "SystemCreationClassName=\"Msvm_ComputerSystem\","
+            "SystemName=\"%s\"} "
+            "where AssocClass = Msvm_VideoHeadOnController "
+            "ResultClass = Msvm_VideoHead",
+            ctrlr->data->DeviceID, uuid_string);
+    if (hypervGetMsvmVideoHeadList(priv, &query, &heads) < 0)
+        goto thumbnail;
+
+    if (heads != NULL) {
+        xRes = heads->data->CurrentHorizontalResolution;
+        yRes = heads->data->CurrentVerticalResolution;
+    }
+
+thumbnail:
+    /* Prepare EPR param - get Msvm_VirtualSystemSettingData */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+            "Name=\"%s\"} "
+            "where AssocClass = Msvm_SettingsDefineState "
+            "ResultClass = Msvm_VirtualSystemSettingData",
+            uuid_string);
+
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* create invokeXmlParam */
+    if (VIR_ALLOC_N(params, 3) < 0)
+        goto cleanup;
+
+    x_param.value = virNumToStr(xRes);
+    y_param.value = virNumToStr(yRes);
+
+    params[0].name = "HeightPixels";
+    params[0].type = SIMPLE_PARAM;
+    params[0].param = &y_param;
+    params[1].name = "WidthPixels";
+    params[1].type = SIMPLE_PARAM;
+    params[1].param = &x_param;
+    params[2].name = "TargetSystem";
+    params[2].type = EPR_PARAM;
+    params[2].param = &eprparam;
+
+    if (hyperv1InvokeMethod(priv, params, 3, "GetVirtualSystemThumbnailImage",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector,
+                &ret_doc) < 0)
+        goto cleanup;
+
+    envelope = ws_xml_get_soap_envelope(ret_doc);
+
+    if (!envelope) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve thumbnail image"));
+        goto cleanup;
+    }
+
+    /* Extract the pixel data from XML and save to a file */
+    body = ws_xml_get_child(envelope, 1, NULL, NULL);
+    thumbnail = ws_xml_get_child(body, 0, NULL, NULL);
+    childCount = ws_xml_get_child_count(thumbnail);
+    pixelCount = childCount / 2;
+
+    if (VIR_ALLOC_N(imageDataBuffer, childCount + 1) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(ppmBuffer, pixelCount * 3) < 0)
+        goto cleanup;
+
+    base = (xmlNodePtr) thumbnail;
+    child = base->children;
+    while (child) {
+        imageDataText = ws_xml_get_node_text((WsXmlNodeH) child);
+        imageDataBuffer[i] = (char) atoi(imageDataText);
+        child = child->next;
+        i++;
+    }
+
+    /* convert rgb565 to rgb888 */
+    bufAs16 = (uint16_t *) imageDataBuffer;
+    for (i=0; i < pixelCount; i++) {
+        px = bufAs16[i];
+        ppmBuffer[i*3] = ((((px >> 11) & 0x1F) * 527) + 23) >> 6;
+        ppmBuffer[i*3+1] = ((((px >> 5) & 0x3F) * 259) + 33) >> 6;
+        ppmBuffer[i*3+2] = (((px & 0x1F) * 527) + 23) >> 6;
+    }
+
+    sprintf(thumbnailFilename, "/tmp/hyperv_thumb_%s.rgb888", uuid_string);
+    if ((fd = fopen(thumbnailFilename, "w")) == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not open temp file for writing"));
+        goto cleanup;
+    }
+
+    /* write image header */
+    fprintf(fd, "P6\n%d %d\n255\n", xRes, yRes);
+
+    /* write image data */
+    fwrite(ppmBuffer, 3, pixelCount, fd);
+    fclose(fd);
+
+    if (virFDStreamOpenFile(stream, (const char *) &thumbnailFilename, 0, 0,
+                O_RDONLY) < 0) {
+        goto cleanup;
+    }
+
+    if (VIR_ALLOC(result) < 0)
+        goto cleanup;
+
+    if (VIR_STRDUP(result, "image/x-portable-pixmap") < 0) {
+        VIR_FREE(result);
+        goto cleanup;
+    }
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    if (ctrlr)
+        hypervFreeObject(priv, (hypervObject *) ctrlr);
+    if (heads)
+        hypervFreeObject(priv, (hypervObject *) heads);
+    if (ret_doc)
+        ws_xml_destroy_doc(ret_doc);
+    VIR_FREE(imageDataBuffer);
+    VIR_FREE(ppmBuffer);
+    VIR_FREE(params);
+    return result;
+}
+
 int
 hyperv1DomainSetVcpus(virDomainPtr domain, unsigned int nvcpus)
 {
@@ -1459,7 +1645,7 @@ hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     params[1].param = &embeddedparam;
 
     if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector) < 0)
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL) < 0)
         goto cleanup;
 
     result = 0;
@@ -1844,7 +2030,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         /* Actually invoke the method to create the VM */
         if (hyperv1InvokeMethod(priv, params, nb_params, "DefineVirtualSystem",
                     MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
-                    selector) < 0) {
+                    selector, NULL) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                     _("Could not create new domain %s"), def->name);
             goto cleanup;
@@ -1932,7 +2118,7 @@ hyperv1DomainUndefineFlags(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNU
 
     /* actually destroy the vm */
     if (hyperv1InvokeMethod(priv, params, 1, "DestroyVirtualSystem",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector) < 0) {
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not delete domain"));
         goto cleanup;
@@ -2023,7 +2209,7 @@ hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
     params[1].param = &embeddedparam;
 
     result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystem",
-            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector);
+            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) vssd);
@@ -2044,7 +2230,7 @@ hyperv1DomainGetSchedulerType(virDomainPtr domain ATTRIBUTE_UNUSED, int *nparams
         return NULL;
     }
 
-    if (!nparams)
+    if (nparams)
         *nparams = 3; /* reservation, limit, weight */
 
     return type;
