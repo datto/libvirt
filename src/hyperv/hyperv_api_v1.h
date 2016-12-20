@@ -95,6 +95,9 @@ int hyperv1DomainIsActive(virDomainPtr domain);
 int hyperv1DomainManagedSave(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainManagedSaveRemove(virDomainPtr domain, unsigned int flags);
+int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
+        unsigned int holdtime, unsigned int *keycodes, int nkeycodes,
+        unsigned int flags);
 int hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
         unsigned int flags);
 
