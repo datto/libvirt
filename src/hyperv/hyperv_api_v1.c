@@ -30,6 +30,7 @@
 
 #include "virlog.h"
 #include "virstring.h"
+#include "virkeycode.h"
 #include "fdstream.h"
 
 #include "hyperv_driver.h"
@@ -1428,10 +1429,9 @@ hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     uint16_t *bufAs16 = NULL;
     uint16_t px;
     uint8_t *ppmBuffer = NULL;
-    uint8_t r, g, b;
     char *result = NULL;
     FILE *fd;
-    int childCount, pixelCount, i;
+    int childCount, pixelCount, i = 0;
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -2402,6 +2402,98 @@ hyperv1DomainManagedSaveRemove(virDomainPtr domain, unsigned int flags)
 
     return result;
 }
+
+int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
+        unsigned int holdtime ATTRIBUTE_UNUSED, unsigned int *keycodes,
+        int nkeycodes, unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1, i = 0, keycode = 0;
+    hypervPrivate *priv = domain->conn->privateData;
+    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_Keyboard *keyboards = NULL;
+    invokeXmlParam *params = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    int *translatedKeycodes = NULL;
+    char *selector = NULL;
+    simpleParam simpleparam;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+        goto cleanup;
+
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_ComputerSystem.CreationClassName=\"Msvm_ComputerSystem\","
+            "Name=\"%s\"} "
+            "where ResultClass = Msvm_Keyboard",
+            uuid_string);
+
+    if (hypervGetMsvmKeyboardList(priv, &query, &keyboards) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not get keyboards for domain"));
+        goto cleanup;
+    }
+
+    /* translate keycodes to xt and generate keyup scancodes.
+     * this code is shamelessly copied fom the vbox driver. */
+    translatedKeycodes = (int *) keycodes;
+
+    for (i = 0; i < nkeycodes; i++) {
+        if (codeset != VIR_KEYCODE_SET_WIN32) {
+            keycode = virKeycodeValueTranslate(codeset, VIR_KEYCODE_SET_WIN32,
+                    translatedKeycodes[i]);
+
+            if (keycode < 0) {
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("Could not translate keycode"));
+                goto cleanup;
+            }
+            translatedKeycodes[i] = keycode;
+        }
+    }
+
+    if (virAsprintf(&selector,
+                    "CreationClassName=Msvm_Keyboard&DeviceID=%s&"
+                    "SystemCreationClassName=Msvm_ComputerSystem&"
+                    "SystemName=%s", keyboards->data->DeviceID, uuid_string) < 0)
+        goto cleanup;
+
+    /* type the keys */
+    for (i = 0; i < nkeycodes; i++) {
+        VIR_FREE(params);
+
+        if (VIR_ALLOC_N(params, 1) < 0)
+            goto cleanup;
+
+        char keyCodeStr[sizeof(int)*3+2];
+        snprintf(keyCodeStr, sizeof(keyCodeStr), "%d", translatedKeycodes[i]);
+
+        simpleparam.value = keyCodeStr;
+
+        params[0].name = "keyCode";
+        params[0].type = SIMPLE_PARAM;
+        params[0].param = &simpleparam;
+
+        if (hyperv1InvokeMethod(priv, params, 1, "TypeKey",
+                    MSVM_KEYBOARD_RESOURCE_URI, selector, NULL) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "Could not press key %d",
+                    translatedKeycodes[i]);
+            goto cleanup;
+        }
+    }
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(params);
+    hypervFreeObject(priv, (hypervObject *) keyboards);
+    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) computerSystem);
+    return result;
+}
+
 
 #define MATCH(FLAG) (flags & (FLAG))
 int

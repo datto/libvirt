@@ -101,6 +101,7 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
     d->domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */
     d->domainManagedSaveRemove = hyperv1DomainManagedSaveRemove; /* 0.9.5 */
+    d->domainSendKey = hyperv1DomainSendKey; /* TODO: get current version */
 
     /* set up capabilities */
     priv->caps = hyperv1CapsInit(priv);
