@@ -1194,7 +1194,7 @@ cleanup:
 }
 
 static int
-hyperv1DomainDefParseEthernetAdapters(virDomainPtr domain, virDomainDefPtr def,
+hyperv1DomainDefParseEthernet(virDomainPtr domain, virDomainDefPtr def,
         Msvm_SyntheticEthernetPortSettingData *nets)
 {
     int result = -1;
@@ -1216,6 +1216,65 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
+        virDomainDefPtr def, Msvm_ResourceAllocationSettingData *rasd)
+{
+    int result = -1;
+    int port_num = 0;
+    char **conn = NULL;
+    char *srcPath = NULL;
+    Msvm_ResourceAllocationSettingData *entry = rasd;
+    virDomainChrDefPtr serial = NULL;
+
+    while (entry != NULL) {
+        if (entry->data->ResourceType ==
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_SERIAL_PORT) {
+            /* clear some vars */
+            serial = NULL;
+            port_num = 0;
+            conn = NULL;
+            srcPath = NULL;
+
+            serial = virDomainChrDefNew();
+
+            serial->deviceType = VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL;
+            serial->source.type = VIR_DOMAIN_CHR_TYPE_PIPE;
+
+            /* set up COM port */
+            port_num = entry->data->ElementName[4] - '0';
+            if (port_num < 1)
+                goto next;
+
+            serial->target.port = port_num;
+
+            /* set up source */
+            if (entry->data->Connection.count < 1) {
+                srcPath = "-1";
+            } else {
+                conn = entry->data->Connection.data;
+                if (*conn == NULL)
+                    srcPath = "-1";
+                else
+                    srcPath = *conn;
+            }
+
+            if (VIR_STRDUP(serial->source.data.file.path, srcPath) < 0)
+                goto cleanup;
+
+            if (VIR_APPEND_ELEMENT(def->serials, def->nserials, serial) < 0) {
+                virDomainChrDefFree(serial);
+                goto cleanup;
+            }
+        }
+next:
+        entry = entry->next;
+    }
+
+    result = 0;
+cleanup:
+    return result;
+}
 /*
  * Exposed driver API funtions. Everything below here is part of the libvirt
  * driver interface
@@ -2510,7 +2569,10 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     if (hyperv1DomainDefParseStorage(domain, def, rasd) < 0)
         goto cleanup;
 
-    if (hyperv1DomainDefParseEthernetAdapters(domain, def, nets) < 0)
+    if (hyperv1DomainDefParseSerial(domain, def, rasd) < 0)
+        goto cleanup;
+
+    if (hyperv1DomainDefParseEthernet(domain, def, nets) < 0)
         goto cleanup;
 
     xml = virDomainDefFormat(def, NULL,
