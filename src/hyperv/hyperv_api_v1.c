@@ -594,6 +594,34 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
+        const char *id, Msvm_SyntheticEthernetPortSettingData **out)
+{
+    int result = -1;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+            "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+            "ResultClass = Msvm_SyntheticEthernetPortSettingData",
+            id);
+
+    if (hypervGetMsvmSyntheticEthernetPortSettingDataList(priv, &query,
+                out) < 0)
+        goto cleanup;
+
+    if (*out == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
 /* API-specific utility functions */
 static int
 hyperv1LookupHostSystemBiosUuid(hypervPrivate *priv, unsigned char *uuid)
@@ -1005,8 +1033,8 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         goto cleanup;
                     }
 
-                    VIR_DEBUG("We did it, we got a disk drive!");
-                    virDomainDiskSetSource(disk, disk_drive->data->DeviceID);
+                    ignore_value(virDomainDiskSetSource(disk,
+                                disk_drive->data->DeviceID));
                 }
 
                 addr = atoi(entry->data->Address);
@@ -1064,6 +1092,127 @@ cleanup:
             virDomainDiskDefFree(disk);
     virStringFreeList(matches);
 
+    return result;
+}
+
+static int
+hyperv1DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
+        Msvm_SyntheticEthernetPortSettingData *net,
+        hypervPrivate *priv)
+{
+    int result = -1;
+    virDomainNetDefPtr ndef = NULL;
+    Msvm_SwitchPort *switchPort = NULL;
+    Msvm_VirtualSwitch *vSwitch = NULL;
+    char **switchPortConnection = NULL;
+    char *switchPortConnectionEscaped = NULL;
+    char *temp = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    VIR_DEBUG("Parsing ethernet adapter '%s'", net->data->InstanceID);
+
+    if (net->data->Connection.count < 1)
+        goto success;
+
+    if (VIR_ALLOC(ndef) < 0)
+        goto cleanup;
+
+    ndef->type = VIR_DOMAIN_NET_TYPE_BRIDGE;
+    /* set mac address */
+    if (virMacAddrParseHex(net->data->Address, &ndef->mac) < 0)
+        goto cleanup;
+
+    /* If there's no switch port connection, then the adapter isn't hooked
+     * up to anything and we don't have to do anything more. */
+    switchPortConnection = net->data->Connection.data;
+    if (*switchPortConnection == NULL) {
+        VIR_DEBUG("Adapter not connected to switch");
+        goto success;
+    }
+
+    /* Now we retrieve the associated Msvm_SwitchPort and Msvm_VirtualSwitch
+     * objects, and use all three to build the XML definition. */
+    switchPortConnectionEscaped = virStringReplace(*switchPortConnection,
+            "\\", "\\\\");
+    switchPortConnectionEscaped = virStringReplace(switchPortConnectionEscaped,
+            "\"", "\\\"");
+
+    virBufferAsprintf(&query,
+                      "select * from Msvm_SwitchPort where __PATH=\"%s\"",
+                      switchPortConnectionEscaped);
+
+    if (hypervGetMsvmSwitchPortList(priv, &query, &switchPort) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve switch port"));
+        goto cleanup;
+    }
+    if (switchPort == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve switch port"));
+        goto cleanup;
+    }
+
+    /* Now we use the switch port to jump to the switch */
+    virBufferFreeAndReset(&query);
+    virBufferAsprintf(&query,
+            "select * from Msvm_VirtualSwitch where Name=\"%s\"",
+            switchPort->data->SystemName);
+
+    if (hypervGetMsvmVirtualSwitchList(priv, &query, &vSwitch) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve virtual switch"));
+        goto cleanup;
+    }
+    if (vSwitch == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve virtual switch"));
+        goto cleanup;
+    }
+
+    /* get bridge name */
+    if (VIR_STRDUP(temp, vSwitch->data->Name) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not set bridge name"));
+        goto cleanup;
+    }
+    ndef->data.bridge.brname = temp;
+
+    if (VIR_APPEND_ELEMENT(def->nets, def->nnets, ndef) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not append definition to domain"));
+        goto cleanup;
+    }
+
+success:
+    result = 0;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) switchPort);
+    hypervFreeObject(priv, (hypervObject *) vSwitch);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1DomainDefParseEthernetAdapters(virDomainPtr domain, virDomainDefPtr def,
+        Msvm_SyntheticEthernetPortSettingData *nets)
+{
+    int result = -1;
+    Msvm_SyntheticEthernetPortSettingData *entry = nets;
+    hypervPrivate *priv = domain->conn->privateData;
+
+    while (entry != NULL) {
+        if (entry->data->ResourceType ==
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_ETHERNET_ADAPTER) {
+            if (hyperv1DomainDefParseSyntheticEthernetAdapter(def, entry, priv) < 0)
+                goto cleanup;
+        }
+        entry = entry->next;
+    }
+
+    result = 0;
+
+cleanup:
     return result;
 }
 
@@ -2240,6 +2389,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_ProcessorSettingData *processorSettingData = NULL;
     Msvm_MemorySettingData *memorySettingData = NULL;
     Msvm_ResourceAllocationSettingData *rasd = NULL;
+    Msvm_SyntheticEthernetPortSettingData *nets = NULL;
 
     /* Flags checked by virDomainDefFormat */
 
@@ -2288,9 +2438,18 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                 virtualSystemSettingData->data->InstanceID,
                 &rasd) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not get information for domain %s"),
+                _("Could not get resource information for domain %s"),
                 computerSystem->data->ElementName);
         goto cleanup;
+    }
+
+    /* Get Msvm_SyntheticEthernetPortSettingData */
+    if (hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &nets) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not get ethernet adapters for domain %s"),
+                computerSystem->data->ElementName);
     }
 
     /* Fill struct */
@@ -2351,6 +2510,9 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     if (hyperv1DomainDefParseStorage(domain, def, rasd) < 0)
         goto cleanup;
 
+    if (hyperv1DomainDefParseEthernetAdapters(domain, def, nets) < 0)
+        goto cleanup;
+
     xml = virDomainDefFormat(def, NULL,
                              virDomainDefFormatConvertXMLFlags(flags));
 
@@ -2361,6 +2523,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     hypervFreeObject(priv, (hypervObject *)processorSettingData);
     hypervFreeObject(priv, (hypervObject *)memorySettingData);
     hypervFreeObject(priv, (hypervObject *)rasd);
+    hypervFreeObject(priv, (hypervObject *)nets);
 
     return xml;
 }
