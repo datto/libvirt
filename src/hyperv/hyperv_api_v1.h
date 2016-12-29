@@ -34,6 +34,10 @@
 #include "capabilities.h"
 #include "hyperv_private.h"
 
+/* Various utility defines */
+#define HYPERV1_MAX_SCSI_CONTROLLERS 4
+#define HYPERV1_MAX_IDE_CONTROLLERS 2
+
 /* Exported utility functions */
 virCapsPtr hyperv1CapsInit(hypervPrivate *priv);
 
