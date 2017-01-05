@@ -979,6 +979,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         if (hyperv1DomainDefParseFloppyStorageExtent(def, disk) < 0) {
                             goto cleanup;
                         }
+                        disk->device = VIR_DOMAIN_DISK_DEVICE_FLOPPY;
                     }
                     break;
                 default:
