@@ -1224,7 +1224,7 @@ hyperv1DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
     int result = -1;
     int port_num = 0;
     char **conn = NULL;
-    char *srcPath = NULL;
+    const char *srcPath = NULL;
     Msvm_ResourceAllocationSettingData *entry = rasd;
     virDomainChrDefPtr serial = NULL;
 
@@ -1237,16 +1237,15 @@ hyperv1DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
             conn = NULL;
             srcPath = NULL;
 
-            serial = virDomainChrDefNew();
-
-            serial->deviceType = VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL;
-            serial->source.type = VIR_DOMAIN_CHR_TYPE_PIPE;
-
-            /* set up COM port */
+            /* get port number */
             port_num = entry->data->ElementName[4] - '0';
             if (port_num < 1)
                 goto next;
 
+            serial = virDomainChrDefNew();
+
+            serial->deviceType = VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL;
+            serial->source.type = VIR_DOMAIN_CHR_TYPE_PIPE;
             serial->target.port = port_num;
 
             /* set up source */
