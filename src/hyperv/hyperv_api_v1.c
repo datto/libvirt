@@ -650,6 +650,28 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1GetHostSystem(hypervPrivate *priv, Msvm_ComputerSystem **system)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+
+    if (hypervGetMsvmComputerSystemList(priv, &query, system) < 0)
+        goto cleanup;
+
+    if (*system == NULL)
+        goto cleanup;
+
+    result = 0;
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
 virCapsPtr
 hyperv1CapsInit(hypervPrivate *priv)
 {
@@ -1275,6 +1297,160 @@ next:
 cleanup:
     return result;
 }
+
+/* Functions for creating and attaching virtual devices */
+static int
+hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
+        virDomainNetDefPtr net, char *hostname)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char switchport_guid_string[VIR_UUID_STRING_BUFLEN];
+    char guest_guid_string[VIR_UUID_STRING_BUFLEN];
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    char *vswitch_selector = NULL;
+    const char *managementservice_selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    char *virtualSystemIdentifiers = NULL;
+    char *connection__PATH = NULL;
+    unsigned char guid[VIR_UUID_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ComputerSystem *computer = NULL;
+    eprParam virtualSwitch_REF, ComputerSystem_REF;
+    simpleParam virtualSwitch_Name, virtualSwitch_FriendlyName,
+                virtualSwitch_ScopeOfResidence;
+    embeddedParam ResourceSettingData;
+    invokeXmlParam *params = NULL;
+    properties_t *NewResources = NULL;
+
+    /*
+     * step 1: create virtual switch port
+     * https://msdn.microsoft.com/en-us/library/cc136782(v=vs.85).aspx
+     */
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", net->data.network.name);
+    virtualSwitch_REF.query = &query;
+    virtualSwitch_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* generate guid for switchport */
+    virUUIDGenerate(guid);
+    virUUIDFormat(guid, switchport_guid_string);
+
+    /* build the parameters */
+    virtualSwitch_Name.value = switchport_guid_string;
+    virtualSwitch_FriendlyName.value = "Dynamic Ethernet Switch Port";
+    virtualSwitch_ScopeOfResidence.value = "";
+
+    /* create xml params */
+    if (VIR_ALLOC_N(params, 4) < 0)
+        goto cleanup;
+    params[0].name = "VirtualSwitch";
+    params[0].type = EPR_PARAM;
+    params[0].param = &virtualSwitch_REF;
+    params[1].name = "Name";
+    params[1].type = SIMPLE_PARAM;
+    params[1].param  = &virtualSwitch_Name;
+    params[2].name = "FriendlyName";
+    params[2].type = SIMPLE_PARAM;
+    params[2].param = &virtualSwitch_FriendlyName;
+    params[3].name = "ScopeOfResidence";
+    params[3].type = SIMPLE_PARAM;
+    params[3].param = &virtualSwitch_ScopeOfResidence;
+
+    if (virAsprintf(&vswitch_selector,
+                      "CreationClassName=Msvm_VirtualSwitchManagementService&"
+                      "Name=nvspwmi&SystemCreationClassName=Msvm_ComputerSystem&"
+                      "SystemName=%s", hostname) < 0)
+        goto cleanup;
+
+    if (hyperv1InvokeMethod(priv, params, 4, "CreateSwitchPort",
+                MSVM_VIRTUALSWITCHMANAGEMENTSERVICE_RESOURCE_URI,
+                vswitch_selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not create port for virtual switch '%s'"),
+                net->data.network.name);
+        goto cleanup;
+    }
+
+    /*
+     * step 2: add the new port to the VM, which creates the connection
+     * https://msdn.microsoft.com/en-us/library/cc160705(v=vs.85).aspx
+     */
+
+    /* generate guid for the adapter to present to the guest */
+    virUUIDGenerate(guid);
+    virUUIDFormat(guid, guest_guid_string);
+    virBufferAsprintf(&query, "{%s}", guest_guid_string);
+    virtualSystemIdentifiers = virBufferContentAndReset(&query);
+
+    /* build the __PATH variable of the switch port */
+    if (hypervMsvmComputerSystemFromDomain(domain, &computer) < 0)
+        goto cleanup;
+    if (virAsprintf(&connection__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_SwitchPort.CreationClassName=\"Msvm_SwitchPort\","
+                "Name=\"%s\",SystemCreationClassName=\"Msvm_VirtualSwitch\","
+                "SystemName=\"%s\"", computer->data->ElementName,
+                switchport_guid_string, net->data.network.name) < 0)
+        goto cleanup;
+
+    /* build the ComputerSystem_REF parameter */
+    virUUIDFormat(domain->uuid, uuid_string);
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    ComputerSystem_REF.query = &query;
+    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* build ResourceSettingData param */
+    if (VIR_ALLOC_N(NewResources, 5) < 0)
+        goto cleanup;
+    NewResources[0].name = "Connection";
+    NewResources[0].val = connection__PATH;
+    NewResources[1].name = "ElementName";
+    NewResources[1].val = "Network Adapter";
+    NewResources[2].name = "VirtualSystemIdentifiers";
+    NewResources[2].val = virtualSystemIdentifiers;
+    NewResources[3].name = "ResourceType";
+    NewResources[3].val = "10";
+    NewResources[4].name = "ResourceSubType";
+    NewResources[4].val = "Microsoft Synthetic Ethernet Port";
+    ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_CLASSNAME;
+    ResourceSettingData.prop_t = NewResources;
+    ResourceSettingData.nbProps = 5;
+
+    /* build xml params */
+    VIR_FREE(params);
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &ResourceSettingData;
+
+    /* invoke */
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                managementservice_selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(vswitch_selector);
+    VIR_FREE(virtualSystemIdentifiers);
+    VIR_FREE(connection__PATH);
+    VIR_FREE(NewResources);
+    VIR_FREE(params);
+    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) computer);
+
+    return result;
+}
+
 /*
  * Exposed driver API funtions. Everything below here is part of the libvirt
  * driver interface
@@ -2700,10 +2876,18 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
     invokeXmlParam *params = NULL;
     properties_t *tab_props = NULL;
     embeddedParam embedded_param;
+    Msvm_ComputerSystem *host = NULL;
+    int i = 0;
     int nb_params;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
+    char *hostname = NULL;
+
+    if (hyperv1GetHostSystem(priv, &host) < 0)
+        goto cleanup;
+
+    hostname = host->data->ElementName;
 
     /* parse xml */
     def = virDomainDefParseString(xml, priv->caps, priv->xmlopt, NULL,
@@ -2769,6 +2953,15 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         if (hyperv1DomainSetMemory(domain, def->mem.cur_balloon) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not set VM memory"));
+        }
+    }
+
+    /* Attach networks */
+    for (i = 0; i < def->nnets; i++) {
+        if (hyperv1DomainAttachSyntheticEthernetAdapter(domain, def->nets[i],
+                    hostname) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not attach network"));
         }
     }
 
