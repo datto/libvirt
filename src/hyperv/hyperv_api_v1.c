@@ -1451,6 +1451,99 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
+{
+    int result = -1;
+    const char *selector = "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    char *com_string = NULL;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ResourceAllocationSettingData *rasd = NULL;
+    Msvm_ResourceAllocationSettingData *entry = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    eprParam ComputerSystem_REF;
+    embeddedParam ResourceSettingData;
+    properties_t *props = NULL;
+    invokeXmlParam *params = NULL;
+
+    if (virAsprintf(&com_string, "COM %d", serial->target.port) < 0)
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetRASDByVSSDInstanceId(priv, vssd->data->InstanceID, &rasd) < 0)
+        goto cleanup;
+
+    /* find the COM port we're interested in changing */
+    entry = rasd;
+    while (entry != NULL) {
+        if ((entry->data->ResourceType ==
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_SERIAL_PORT) &&
+                STREQ(entry->data->ElementName, com_string)) {
+            /* found our com port */
+            break;
+        }
+        entry = entry->next;
+    }
+
+    if (entry == NULL)
+        goto cleanup;
+
+    /* build Msvm_ComputerSystem ref */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    ComputerSystem_REF.query = &query;
+    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* build rasd param */
+    ResourceSettingData.nbProps = 4;
+    if (VIR_ALLOC_N(props, ResourceSettingData.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Connection";
+    if (STRNEQ(serial->source.data.file.path, "-1"))
+        props[0].val = serial->source.data.file.path;
+    else
+        props[0].val = "";
+    props[1].name = "InstanceID";
+    props[1].val = entry->data->InstanceID;
+    props[2].name = "ResourceType";
+    props[2].val = "17"; /* shouldn't be hardcoded but whatever */
+    props[3].name = "ResourceSubType";
+    props[3].val = entry->data->ResourceSubType;
+    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    ResourceSettingData.prop_t = props;
+
+    /* build xml params object */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "ComputerSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &ResourceSettingData;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add serial device"));
+        goto cleanup;
+    }
+    result = 0;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) rasd);
+    virBufferFreeAndReset(&query);
+    VIR_FREE(com_string);
+    return result;
+}
+
 /*
  * Exposed driver API funtions. Everything below here is part of the libvirt
  * driver interface
@@ -2962,6 +3055,13 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
                     hostname) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                     _("Could not attach network"));
+        }
+    }
+
+    /* Attach serials */
+    for (i = 0; i < def->nserials; i++) {
+        if (hyperv1DomainAttachSerial(domain, def->serials[i]) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach serial"));
         }
     }
 
