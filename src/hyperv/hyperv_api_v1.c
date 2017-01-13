@@ -3802,6 +3802,149 @@ cleanup:
 }
 
 int
+hyperv1DomainAttachDevice(virDomainPtr domain, const char *xml)
+{
+    return hyperv1DomainAttachDeviceFlags(domain, xml, 0);
+}
+
+int
+hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
+        unsigned int flags ATTRIBUTE_UNUSED)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char *xmlDomain = NULL;
+    virDomainDefPtr def = NULL;
+    virDomainDeviceDefPtr dev = NULL;
+    Msvm_ComputerSystem *host = NULL;
+    char *hostname = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    Msvm_ResourceAllocationSettingData *controller = NULL;
+    Msvm_ResourceAllocationSettingData *rasd = NULL, *entry = NULL;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    int num_scsi = 0;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* get domain definition */
+    if ((xmlDomain = hyperv1DomainGetXMLDesc(domain, 0)) == NULL)
+        goto cleanup;
+
+    if ((def = virDomainDefParseString(xmlDomain, priv->caps, priv->xmlopt,
+                    NULL, 1 << VIR_DOMAIN_VIRT_HYPERV | VIR_DOMAIN_XML_INACTIVE)) == NULL)
+        goto cleanup;
+
+    /* get domain device definition */
+    if ((dev = virDomainDeviceDefParse(xml, def, priv->caps, priv->xmlopt,
+                    VIR_DOMAIN_XML_INACTIVE)) == NULL)
+        goto cleanup;
+
+    /* get the host computer system */
+    if (hyperv1GetHostSystem(priv, &host) < 0)
+        goto cleanup;
+
+    hostname = host->data->ElementName;
+
+    switch(dev->type) {
+        case VIR_DOMAIN_DEVICE_DISK:
+            /* get our controller
+             *
+             * TODO: if it turns out that the order is not the same across
+             * invocations, implement saving DeviceID of SCSI controllers
+             */
+            if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+                goto cleanup;
+
+            if (hyperv1GetRASDByVSSDInstanceId(priv, vssd->data->InstanceID, &rasd) < 0)
+                goto cleanup;
+
+            entry = rasd;
+            /*
+             * The logic here is adapted from the controller identification loop
+             * in hyperv1DomainAttachStorage(). This code tries to perform in the
+             * same way to make things as consistent as possible.
+             */
+            switch(dev->data.disk->bus) {
+                case VIR_DOMAIN_DISK_BUS_IDE:
+                    while (entry != NULL) {
+                        if (entry->data->ResourceType ==
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {
+                            if ((entry->data->Address[0] - '0') ==
+                                    dev->data.disk->info.addr.drive.controller) {
+                                controller = entry;
+                                break;
+                            }
+                        }
+                        entry = entry->next;
+                    }
+                    if (entry == NULL)
+                        goto cleanup;
+                    break;
+                case VIR_DOMAIN_DISK_BUS_SCSI:
+                    while (entry != NULL) {
+                        if (entry->data->ResourceType ==
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                            if (num_scsi++ ==
+                                    dev->data.disk->info.addr.drive.controller) {
+                                controller = entry;
+                                break;
+                            }
+                        }
+                        entry = entry->next;
+                    }
+                    if (entry == NULL)
+                        goto cleanup;
+                    break;
+                case VIR_DOMAIN_DISK_BUS_FDC:
+                    while (entry != NULL) {
+                        if (entry->data->ResourceType ==
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY) {
+                            controller = entry;
+                            break;
+                        }
+                        entry = entry->next;
+                    }
+                    if (entry == NULL)
+                        goto cleanup;
+                    break;
+                default:
+                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Invalid disk bus in definition"));
+                    goto cleanup;
+            }
+
+            if (hyperv1DomainAttachStorageVolume(domain, dev->data.disk,
+                        controller, hostname) < 0)
+                goto cleanup;
+            break;
+        case VIR_DOMAIN_DEVICE_NET:
+            if (hyperv1DomainAttachSyntheticEthernetAdapter(domain, dev->data.net,
+                        hostname) < 0)
+                goto cleanup;
+            break;
+        case VIR_DOMAIN_DEVICE_CHR:
+            if (hyperv1DomainAttachSerial(domain, dev->data.chr) < 0)
+                goto cleanup;
+        default:
+            /* unsupported device type */
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Attaching devices of type %d is not implemented"), dev->type);
+            goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(xmlDomain);
+    virDomainDefFree(def);
+    virDomainDeviceDefFree(dev);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) rasd);
+    hypervFreeObject(priv, (hypervObject *) host);
+    return result;
+}
+
+int
 hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
 {
     int result = -1;
