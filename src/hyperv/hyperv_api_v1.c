@@ -3625,6 +3625,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
     char *hostname = NULL;
+    bool success = false;
 
     if (hyperv1GetHostSystem(priv, &host) < 0)
         goto cleanup;
@@ -3670,16 +3671,15 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
 
         /* populate a domain ptr so that we can edit it */
         domain = hyperv1DomainLookupByName(conn, def->name);
-
-        VIR_DEBUG("Domain created! name: %s, uuid: %s",
-                domain->name, virUUIDFormat(domain->uuid, uuid_string));
     }
 
     /* set domain vcpus */
     if (def->vcpus) {
-        if (hyperv1DomainSetVcpus(domain, def->maxvcpus) < 0)
+        if (hyperv1DomainSetVcpus(domain, def->maxvcpus) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                     _("Could not set VM vCPUs"));
+            goto cleanup;
+        }
     }
 
     /* Set VM maximum memory */
@@ -3687,6 +3687,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         if (hyperv1DomainSetMaxMemory(domain, def->mem.max_memory) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not set VM maximum memory"));
+            goto cleanup;
         }
     }
 
@@ -3695,6 +3696,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         if (hyperv1DomainSetMemory(domain, def->mem.cur_balloon) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("Could not set VM memory"));
+            goto cleanup;
         }
     }
 
@@ -3704,6 +3706,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
                     hostname) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                     _("Could not attach network"));
+            goto cleanup;
         }
     }
 
@@ -3711,19 +3714,31 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
     for (i = 0; i < def->nserials; i++) {
         if (hyperv1DomainAttachSerial(domain, def->serials[i]) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach serial"));
+            goto cleanup;
         }
     }
 
     /* Attach all storage */
     if (hyperv1DomainAttachStorage(domain, def, hostname) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach storage"));
+        goto cleanup;
     }
+
+    success = true;
+    VIR_DEBUG("Domain created! name: %s, uuid: %s",
+            domain->name, virUUIDFormat(domain->uuid, uuid_string));
 
 cleanup:
     virDomainDefFree(def);
     VIR_FREE(tab_props);
     VIR_FREE(params);
-    return domain;
+    if (success) {
+        return domain;
+    } else {
+        VIR_DEBUG("Domain creation failed, rolling back");
+        ignore_value(hyperv1DomainUndefine(domain));
+        return NULL;
+    }
 }
 
 int
