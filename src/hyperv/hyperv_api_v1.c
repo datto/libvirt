@@ -2002,6 +2002,81 @@ cleanup:
 }
 
 static int
+hyperv1DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
+        Msvm_ResourceAllocationSettingData *driveSettings, const char *hostname)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    invokeXmlParam *params = NULL;
+    properties_t *props = NULL;
+    embeddedParam embeddedparam;
+    eprParam eprparam;
+    char *instance_temp = NULL;
+    char *settings__PATH = NULL;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    VIR_DEBUG("Attaching floppy image '%s'", disk->src->path);
+
+    /* prepare PATH string */
+    instance_temp = virStringReplace(driveSettings->data->InstanceID, "\\", "\\\\");
+    if (virAsprintf(&settings__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0)
+        goto cleanup;
+
+    /* prepare embedded param */
+    embeddedparam.nbProps = 4;
+    if (VIR_ALLOC_N(props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = settings__PATH;
+    props[1].name = "Connection";
+    props[1].val = disk->src->path;
+    props[2].name = "ResourceType";
+    props[2].val = "21";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Virtual Floppy Disk";
+    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam.prop_t = props;
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    eprparam.query = &query;
+    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* create xml params */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add floppy disk"));
+        goto cleanup;
+    }
+
+    result = 0;
+cleanup:
+    VIR_FREE(params);
+    VIR_FREE(props);
+    VIR_FREE(instance_temp);
+    VIR_FREE(settings__PATH);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
 hyperv1DomainAttachStorageVolume(virDomainPtr domain, virDomainDiskDefPtr disk,
         Msvm_ResourceAllocationSettingData *controller, const char *hostname)
 {
@@ -2035,6 +2110,7 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
     Msvm_ResourceAllocationSettingData *entry = NULL;
     Msvm_ResourceAllocationSettingData *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
     Msvm_ResourceAllocationSettingData *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData *floppySettings = NULL;
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -2048,8 +2124,7 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
     }
 
     /*
-     * filter through all the rasd entries and isolate our ide and scsi
-     * controllers
+     * filter through all the rasd entries and isolate our controllers
      */
     if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
         goto cleanup;
@@ -2065,6 +2140,9 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
                 break;
             case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
                 scsiControllers[num_scsi_controllers++] = entry;
+                break;
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY:
+                floppySettings = entry;
                 break;
         }
         entry = entry->next;
@@ -2094,7 +2172,13 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
                 }
                 break;
             case VIR_DOMAIN_DISK_BUS_FDC:
-                /* we'll get to this in a bit */
+                /* floppy disk */
+                if (hyperv1DomainAttachFloppy(domain, def->disks[i],
+                            floppySettings, hostname) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Could not attach floppy disk"));
+                    goto cleanup;
+                }
                 break;
             default:
                 virReportError(VIR_ERR_INTERNAL_ERROR, _("Unsupported controller type"));
