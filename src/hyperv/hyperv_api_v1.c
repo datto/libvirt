@@ -570,31 +570,6 @@ cleanup:
 }
 
 static int
-hyperv1GetMsvmDiskDriveByPATH(hypervPrivate *priv, const char *path,
-        Msvm_DiskDrive **out)
-{
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    int result = -1;
-    Msvm_DiskDrive *drives = NULL;
-
-    virBufferAsprintf(&query, "select * from Msvm_DiskDrive where "
-                              "__PATH=\"%s\"", path);
-
-    if (hypervGetMsvmDiskDriveList(priv, &query, &drives) < 0)
-        goto cleanup;
-
-    if (drives == NULL)
-        goto cleanup;
-
-    *out = drives;
-    result = 0;
-
-cleanup:
-    virBufferFreeAndReset(&query);
-    return result;
-}
-
-static int
 hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
         const char *id, Msvm_SyntheticEthernetPortSettingData **out)
 {
@@ -748,6 +723,34 @@ hyperv1GetDeviceParentRasdFromDeviceId(const char *parentDeviceId,
         result = 0;
 
     return result;
+}
+
+static char *
+hyperv1GetInstanceIDFromXMLResponse(WsXmlDocH response)
+{
+    WsXmlNodeH envelope = NULL;
+    char *instanceId = NULL;
+
+    envelope = ws_xml_get_soap_envelope(response);
+    if (!envelope) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Invalid XML response"));
+        goto cleanup;
+    }
+
+    instanceId = ws_xml_get_xpath_value(response,
+            (char *) "//w:Selector[@Name='InstanceID']");
+
+    if (!instanceId) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not find selectors in method response"));
+        goto cleanup;
+    }
+
+    return instanceId;
+
+cleanup:
+    return NULL;
 }
 
 /* Functions for deserializing device entries */
@@ -907,7 +910,6 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
     hypervPrivate *priv = domain->conn->privateData;
     Msvm_ResourceAllocationSettingData *entry = rasd;
     Msvm_ResourceAllocationSettingData *disk_parent = NULL, *disk_ctrlr = NULL;
-    Msvm_DiskDrive *disk_drive = NULL;
     virDomainDiskDefPtr disk = NULL;
     int result = -1;
     int scsi_idx = 0;
@@ -915,8 +917,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
     char **conn = NULL;
     char **matches = NULL;
     char **hostResource = NULL;
-    char *hostResourceEscaped = NULL;
-    ssize_t unmounted_lun = 0;
+    ssize_t found_lun = 0;
     int addr = -1, i = 0, ctrlr_idx = -1;
     Msvm_ResourceAllocationSettingData *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
     Msvm_ResourceAllocationSettingData *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
@@ -971,8 +972,14 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
 
             /* common fields first */
             disk->src->type = VIR_STORAGE_TYPE_FILE;
-            disk->device = VIR_DOMAIN_DISK_DEVICE_DISK;
             disk->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE;
+
+            /* note if it's a CD drive */
+            if (STREQ(entry->data->ResourceSubType, "Microsoft Virtual CD/DVD Disk")) {
+                disk->device = VIR_DOMAIN_DISK_DEVICE_CDROM;
+            } else {
+                disk->device = VIR_DOMAIN_DISK_DEVICE_DISK;
+            }
 
             /* copy in the source path */
             if (entry->data->Connection.count < 1)
@@ -1030,34 +1037,20 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
 
                 hostResource = entry->data->HostResource.data;
 
-                /* check if drive is unmounted */
-                unmounted_lun = virStringSearch(*hostResource, "(NODRIVE)",
+                /*
+                 * Use regex to lift DeviceID of backing Msvm_DiskDrive
+                 * from hostResource
+                 */
+                found_lun = virStringSearch(*hostResource,
+                        "(Microsoft:[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})\\\\\\\\[[:alnum:]]+",
                         2, &matches);
 
-                if (unmounted_lun) {
-                    /* LUN is set but not mounted */
-                    VIR_DEBUG("LUN set but no disk attached");
-                    ignore_value(virDomainDiskSetSource(disk, "NODRIVE"));
-                    virStringFreeList(matches);
+                if (found_lun > 0) {
+                    ignore_value(virDomainDiskSetSource(disk, matches[0]));
                 } else {
-                    /* fetch Msvm_DiskDrive */
-                    /*
-                     * TODO: is this necessary? we could use regex to get this
-                     * out of the host resource entry itself...
-                     */
-                    hostResourceEscaped = virStringReplace(*hostResource,
-                            "\\", "\\\\");
-                    hostResourceEscaped = virStringReplace(hostResourceEscaped,
-                            "\"", "\\\"");
-                    if (hyperv1GetMsvmDiskDriveByPATH(priv, hostResourceEscaped,
-                                &disk_drive) < 0) {
-                        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                _("Could not find disk drive for LUN"));
-                        goto cleanup;
-                    }
-
-                    ignore_value(virDomainDiskSetSource(disk,
-                                disk_drive->data->DeviceID));
+                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Could not find SCSI drive address"));
+                    goto cleanup;
                 }
 
                 addr = atoi(entry->data->Address);
@@ -1541,6 +1534,578 @@ cleanup:
     hypervFreeObject(priv, (hypervObject *) rasd);
     virBufferFreeAndReset(&query);
     VIR_FREE(com_string);
+    return result;
+}
+
+static int
+hyperv1DomainCreateSCSIController(virDomainPtr domain)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    const char *selector =
+        "CreationClassname=Msvm_VirtualSystemManagementService";
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    properties_t *props = NULL;
+    invokeXmlParam *params = NULL;
+    embeddedParam ResourceSettingData;
+    eprParam ComputerSystem_REF;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+
+
+    VIR_DEBUG("Attaching SCSI Controller");
+    /*
+     * https://msdn.microsoft.com/en-us/library/cc160705(v=vs.85).aspx
+     */
+
+    /* prepare ComputerSystem_REF param */
+    virUUIDFormat(domain->uuid, uuid_string);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
+    ComputerSystem_REF.query = &query;
+    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* build ResourceSettingData param */
+    if (VIR_ALLOC_N(props, 3) < 0)
+        goto cleanup;
+    props[0].name = "ElementName";
+    props[0].val = "SCSI Controller";
+    props[1].name = "ResourceType";
+    props[1].val = "6";
+    props[2].name = "ResourceSubType";
+    props[2].val = "Microsoft Synthetic SCSI Controller";
+
+    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    ResourceSettingData.prop_t = props;
+    ResourceSettingData.nbProps = 3;
+
+    /* build xml params */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &ResourceSettingData;
+
+    /* invoke */
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    VIR_FREE(params);
+    VIR_FREE(props);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+/* TODO: better error reporting from this function
+ * virReportError() doesn't seem to like showing an error occurred
+ * this is probably because I don't quite understand how the error-reporting
+ * facilities work
+ */
+static int
+hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
+        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+{
+    int result = -1;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    invokeXmlParam *params = NULL;
+    properties_t *props = NULL;
+    eprParam eprparam1, eprparam2;
+    embeddedParam embeddedparam1, embeddedparam2;
+    char *controller__PATH = NULL;
+    char *settings__PATH = NULL;
+    char *instance_temp = NULL;
+    char *settings_instance_id = NULL;
+    WsXmlDocH response = NULL;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    VIR_DEBUG("Now attaching disk image '%s' with address %d to bus %d of type %d",
+            disk->src->path, disk->info.addr.drive.unit,
+            disk->info.addr.drive.controller, disk->bus);
+
+    /* First we add the settings object */
+
+    /* prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    eprparam1.query = &query;
+    eprparam1.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* generate controller PATH */
+    instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0)
+        goto cleanup;
+
+    /* create embedded params */
+    embeddedparam1.nbProps = 4;
+    if (VIR_ALLOC_N(props, embeddedparam1.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = controller__PATH;
+    props[1].name = "Address";
+    props[1].val = virNumToStr(disk->info.addr.drive.unit);
+    props[2].name = "ResourceType";
+    props[2].val = "22";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Synthetic Disk Drive";
+    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam1.prop_t = props;
+
+    /* create xml params */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam1;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam1;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, &response) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+        goto cleanup;
+    }
+
+    if (!response) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response"));
+        goto cleanup;
+    }
+
+    /* step 2: create the virtual disk image */
+
+    /* get instance id of newly created disk drive from xml response */
+    settings_instance_id = hyperv1GetInstanceIDFromXMLResponse(response);
+    if (!settings_instance_id)
+        goto cleanup;
+
+    /* prepare PATH variable */
+    VIR_FREE(instance_temp);
+    instance_temp = virStringReplace(settings_instance_id, "\\", "\\\\");
+    if (virAsprintf(&settings__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0)
+        goto cleanup;
+
+    /* prepare embedded param 2 */
+    VIR_FREE(props);
+    embeddedparam2.nbProps = 4;
+    if (VIR_ALLOC_N(props, embeddedparam2.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = settings__PATH;
+    props[1].name = "Connection";
+    props[1].val = disk->src->path;
+    props[2].name = "ResourceType";
+    props[2].val = "21";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Virtual Hard Disk";
+    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam2.prop_t = props;
+
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    eprparam2.query = &query;
+    eprparam2.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* create xml params */
+    VIR_FREE(params);
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &eprparam2;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam2;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+        goto cleanup;
+    }
+
+    result = 0;
+cleanup:
+    virBufferFreeAndReset(&query);
+    VIR_FREE(params);
+    VIR_FREE(props);
+    VIR_FREE(controller__PATH);
+    VIR_FREE(settings__PATH);
+    VIR_FREE(instance_temp);
+    VIR_FREE(settings_instance_id);
+    if (response)
+        ws_xml_destroy_doc(response);
+    return result;
+}
+
+static int
+hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
+        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    char *hostResource = NULL;
+    char *controller__PATH = NULL;
+    char *instance_temp = NULL;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    invokeXmlParam *params = NULL;
+    properties_t *props = NULL;
+    eprParam ComputerSystem_REF;
+    embeddedParam embeddedparam;
+
+    if (strstr(disk->src->path, "NODRIVE"))
+        goto success; /* Hyper-V doesn't let you define LUNs with no connection */
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    VIR_DEBUG("Now attaching LUN '%s' with address %d to bus %d of type %d",
+            disk->src->path, disk->info.addr.drive.unit,
+            disk->info.addr.drive.controller, disk->bus);
+
+    /* prepare HostResource */
+    /* TODO: fix this so it can access LUNs on different hosts */
+    virBufferAsprintf(&query, "\\\\%s\\root\\virtualization:"
+            "Msvm_DiskDrive.CreationClassName=\"Msvm_DiskDrive\","
+            "DeviceID=\"%s\",SystemCreationClassName=\"Msvm_ComputerSystem\","
+            "SystemName=\"%s\"",
+            hostname, disk->src->path, hostname);
+    hostResource = virBufferContentAndReset(&query);
+
+    /* prepare controller's path */
+    instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0) {
+        goto cleanup;
+    }
+
+    /* prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    ComputerSystem_REF.query = &query;
+    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* create embedded param */
+    embeddedparam.nbProps = 5;
+    if (VIR_ALLOC_N(props, embeddedparam.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = controller__PATH;
+    props[1].name = "Address";
+    props[1].val = virNumToStr(disk->info.addr.drive.unit);
+    props[2].name = "ResourceType";
+    props[2].val = "22";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Physical Disk Drive";
+    props[4].name = "HostResource";
+    props[4].val = hostResource;
+    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam.prop_t = props;
+
+    /* create xml param */
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add LUN"));
+        goto cleanup;
+    }
+
+success:
+    result = 0;
+cleanup:
+    VIR_FREE(params);
+    VIR_FREE(props);
+    VIR_FREE(controller__PATH);
+    VIR_FREE(hostResource);
+    VIR_FREE(instance_temp);
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
+hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
+        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+{
+    int result = -1;
+    const char *selector =
+        "CreationClassName=Msvm_VirtualSystemManagementService";
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    invokeXmlParam *params = NULL;
+    properties_t *props = NULL;
+    WsXmlDocH response = NULL;
+    char *instance_temp = NULL;
+    char *controller__PATH = NULL;
+    char *settings__PATH = NULL;
+    char *settings_instance_id = NULL;
+    eprParam ComputerSystem_REF;
+    embeddedParam embeddedparam1, embeddedparam2;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    VIR_DEBUG("Now attaching CD/DVD '%s' with address %d to bus %d of type %d",
+            disk->src->path, disk->info.addr.drive.unit,
+            disk->info.addr.drive.controller, disk->bus);
+
+    /* prepare EPR param */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    ComputerSystem_REF.query = &query;
+    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
+
+    /* generate controller PATH */
+    instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0)
+        goto cleanup;
+
+    /* create embedded param for synthetic DVD drive */
+    embeddedparam1.nbProps = 4;
+    if (VIR_ALLOC_N(props, embeddedparam1.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = controller__PATH;
+    props[1].name = "Address";
+    props[1].val = virNumToStr(disk->info.addr.drive.unit);
+    props[2].name = "ResourceType";
+    props[2].val = "16";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Synthetic DVD Drive";
+    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam1.prop_t = props;
+
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam1;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, &response) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add DVD drive"));
+        goto cleanup;
+    }
+
+    if (!response) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response"));
+        goto cleanup;
+    }
+
+    /* step 2: put an ISO into the virtual DVD drive we just created */
+
+    settings_instance_id = hyperv1GetInstanceIDFromXMLResponse(response);
+    if (!settings_instance_id)
+        goto cleanup;
+
+    /* get instance id of newly created DVD drive from xml response */
+    settings_instance_id = hyperv1GetInstanceIDFromXMLResponse(response);
+    if (!settings_instance_id)
+        goto cleanup;
+
+    /* prepare parent reference */
+    VIR_FREE(instance_temp);
+    instance_temp = virStringReplace(settings_instance_id, "\\", "\\\\");
+    if (virAsprintf(&settings__PATH, "\\\\%s\\root\\virtualization:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, instance_temp) < 0)
+        goto cleanup;
+
+    /* refresh buffer */
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+
+    /* prepare embedded param 2 */
+    VIR_FREE(props);
+    embeddedparam2.nbProps = 4;
+    if (VIR_ALLOC_N(props, embeddedparam2.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "Parent";
+    props[0].val = settings__PATH;
+    props[1].name = "Connection";
+    props[1].val = disk->src->path;
+    props[2].name = "ResourceType";
+    props[2].val = "21";
+    props[3].name = "ResourceSubType";
+    props[3].val = "Microsoft Virtual CD/DVD Disk";
+    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam2.prop_t = props;
+
+    /* prepare XML params */
+    VIR_FREE(params);
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "TargetSystem";
+    params[0].type = EPR_PARAM;
+    params[0].param = &ComputerSystem_REF;
+    params[1].name = "ResourceSettingData";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &embeddedparam2;
+
+    if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+        goto cleanup;
+    }
+
+    result = 0;
+cleanup:
+    VIR_FREE(params);
+    VIR_FREE(controller__PATH);
+    VIR_FREE(settings__PATH);
+    VIR_FREE(instance_temp);
+    VIR_FREE(settings_instance_id);
+    VIR_FREE(props);
+    virBufferFreeAndReset(&query);
+    if (response)
+        ws_xml_destroy_doc(response);
+    return result;
+
+}
+
+static int
+hyperv1DomainAttachStorageVolume(virDomainPtr domain, virDomainDiskDefPtr disk,
+        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+{
+    switch (disk->device) {
+        case VIR_DOMAIN_DISK_DEVICE_DISK:
+            return hyperv1DomainAttachStorageExtent(domain, disk, controller,
+                    hostname);
+        case VIR_DOMAIN_DISK_DEVICE_LUN:
+            return hyperv1DomainAttachPhysicalDisk(domain, disk, controller,
+                    hostname);
+        case VIR_DOMAIN_DISK_DEVICE_CDROM:
+            return hyperv1DomainAttachCDROM(domain, disk, controller, hostname);
+        default:
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid disk bus"));
+            return -1;
+    }
+}
+
+static int
+hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
+        const char *hostname)
+{
+    int result = -1;
+    int num_scsi_controllers = 0;
+    int i = 0;
+    int ctrlr_idx = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ResourceAllocationSettingData *rasd = NULL;
+    Msvm_ResourceAllocationSettingData *entry = NULL;
+    Msvm_ResourceAllocationSettingData *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    /* start with attaching scsi controllers */
+    for (i = 0; i < def->ncontrollers; i++) {
+        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI) {
+            /* we have a scsi controller */
+            if (hyperv1DomainCreateSCSIController(domain) < 0)
+                goto cleanup;
+        }
+    }
+
+    /*
+     * filter through all the rasd entries and isolate our ide and scsi
+     * controllers
+     */
+    if (hyperv1GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hyperv1GetRASDByVSSDInstanceId(priv, vssd->data->InstanceID, &rasd) < 0)
+        goto cleanup;
+
+    entry = rasd;
+    while (entry != NULL) {
+        switch (entry->data->ResourceType) {
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER:
+                ideControllers[entry->data->Address[0] - '0'] = entry;
+                break;
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
+                scsiControllers[num_scsi_controllers++] = entry;
+                break;
+        }
+        entry = entry->next;
+    }
+
+    /* now we loop through and attach all the disks */
+    for (i = 0; i < def->ndisks; i++) {
+        ctrlr_idx = def->disks[i]->info.addr.drive.controller;
+
+        switch(def->disks[i]->bus) {
+            case VIR_DOMAIN_DISK_BUS_IDE:
+                /* ide disk */
+                if (hyperv1DomainAttachStorageVolume(domain, def->disks[i],
+                            ideControllers[ctrlr_idx], hostname) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Could not attach disk to IDE controller"));
+                    goto cleanup;
+                }
+                break;
+            case VIR_DOMAIN_DISK_BUS_SCSI:
+                /* scsi disk */
+                if (hyperv1DomainAttachStorageVolume(domain, def->disks[i],
+                            scsiControllers[ctrlr_idx], hostname) < 0) {
+                    virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Could not attach disk to SCSI controller"));
+                    goto cleanup;
+                }
+                break;
+            case VIR_DOMAIN_DISK_BUS_FDC:
+                /* we'll get to this in a bit */
+                break;
+            default:
+                virReportError(VIR_ERR_INTERNAL_ERROR, _("Unsupported controller type"));
+                goto cleanup;
+        }
+    }
+
+    result = 0;
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) rasd);
+    hypervFreeObject(priv, (hypervObject *) vssd);
     return result;
 }
 
@@ -3063,6 +3628,11 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
         if (hyperv1DomainAttachSerial(domain, def->serials[i]) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach serial"));
         }
+    }
+
+    /* Attach all storage */
+    if (hyperv1DomainAttachStorage(domain, def, hostname) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach storage"));
     }
 
 cleanup:
