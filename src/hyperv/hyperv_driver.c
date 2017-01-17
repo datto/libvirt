@@ -38,6 +38,7 @@
 #include "virstring.h"
 
 #include "hyperv_api_v1.h"
+#include "hyperv_network_api_v1.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -45,9 +46,11 @@ VIR_LOG_INIT("hyperv.hyperv_driver");
 
 /* Forward declarations */
 static virHypervisorDriver hypervHypervisorDriver;
+static virNetworkDriver hypervNetworkDriver;
 
 static int
-hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
+hypervSetupV1(virHypervisorDriverPtr d, virNetworkDriverPtr n,
+        hypervPrivate *priv)
 {
     int result = -1;
 
@@ -104,6 +107,13 @@ hypervSetupV1(virHypervisorDriver *d, hypervPrivate *priv)
     d->domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */
     d->domainManagedSaveRemove = hyperv1DomainManagedSaveRemove; /* 0.9.5 */
     d->domainSendKey = hyperv1DomainSendKey; /* TODO: get current version */
+
+    /* Set up network driver functions */
+    n->connectListNetworks = hyperv1ConnectListNetworks; /* TODO: get current version */
+    n->connectNumOfNetworks = hyperv1ConnectNumOfNetworks; /* TODO: get current version */
+    n->connectListDefinedNetworks = hyperv1ConnectListDefinedNetworks; /* TODO: get current version */
+    n->networkLookupByName = hyperv1NetworkLookupByName; /* TODO: get current version */
+    n->connectNumOfDefinedNetworks = hyperv1ConnectNumOfDefinedNetworks; /* TODO: get current version */
 
     /* set up capabilities */
     priv->caps = hyperv1CapsInit(priv);
@@ -245,7 +255,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    hypervSetupV1(&hypervHypervisorDriver, priv);
+    hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
 
     /* init xmlopt for domain XML */
     priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
@@ -393,6 +403,7 @@ hypervDebugHandler(const char *message, debug_level_e level,
 
 static virConnectDriver hypervConnectDriver = {
     .hypervisorDriver = &hypervHypervisorDriver,
+    .networkDriver = &hypervNetworkDriver,
 };
 
 int
