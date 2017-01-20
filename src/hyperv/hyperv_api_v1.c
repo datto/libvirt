@@ -4118,6 +4118,36 @@ hyperv1DomainGetSchedulerParametersFlags(virDomainPtr domain,
     return result;
 }
 
+unsigned long long
+hyperv1NodeGetFreeMemory(virConnectPtr conn)
+{
+    unsigned long long res = 0;
+    hypervPrivate *priv = conn->privateData;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Win32_OperatingSystem *operatingSystem = NULL;
+
+    /* Get Win32_OperatingSystem */
+    virBufferAddLit(&query, WIN32_OPERATINGSYSTEM_WQL_SELECT);
+
+    if (hypervGetWin32OperatingSystemList(priv, &query, &operatingSystem) < 0) {
+        goto cleanup;
+    }
+
+    if (operatingSystem == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not get Win32_OperatingSystem"));
+        goto cleanup;
+    }
+
+    /* Return free memory in bytes */
+    res = operatingSystem->data->FreePhysicalMemory * 1024;
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) operatingSystem);
+    virBufferFreeAndReset(&query);
+    return res;
+}
+
 int
 hyperv1DomainIsActive(virDomainPtr domain)
 {

@@ -102,6 +102,7 @@ hypervSetupV1(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     d->domainGetSchedulerType = hyperv1DomainGetSchedulerType; /* TODO: get current version */
     d->domainGetSchedulerParameters = hyperv1DomainGetSchedulerParameters; /* TODO: get current version */
     d->domainGetSchedulerParametersFlags = hyperv1DomainGetSchedulerParametersFlags; /* TODO: get current version */
+    d->nodeGetFreeMemory = hyperv1NodeGetFreeMemory; /* TODO: get current version */
     d->domainIsActive = hyperv1DomainIsActive;
     d->domainManagedSave = hyperv1DomainManagedSave; /* 0.9.5 */
     d->domainHasManagedSaveImage = hyperv1DomainHasManagedSaveImage; /* 0.9.5 */

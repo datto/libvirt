@@ -98,6 +98,7 @@ int hyperv1DomainGetSchedulerParameters(virDomainPtr domain,
         virTypedParameterPtr params, int *nparams);
 int hyperv1DomainGetSchedulerParametersFlags(virDomainPtr domain,
         virTypedParameterPtr params, int *nparams, unsigned int flags);
+unsigned long long hyperv1NodeGetFreeMemory(virConnectPtr conn);
 int hyperv1DomainIsActive(virDomainPtr domain);
 int hyperv1DomainManagedSave(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags);
