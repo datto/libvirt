@@ -128,7 +128,30 @@ cleanup:
     return result;
 }
 
+static char *
+hypervNodeGetWindowsVersion(hypervPrivate *priv)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Win32_OperatingSystem *os = NULL;
+    char *result = NULL;
 
+    virBufferAddLit(&query, WIN32_OPERATINGSYSTEM_WQL_SELECT);
+
+    if (hypervGetWin32OperatingSystemList(priv, &query, &os) < 0)
+        goto cleanup;
+
+    if (os == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not get OS info"));
+        goto cleanup;
+    }
+
+    result = os->data->Version;
+
+cleanup:
+    hypervFreeObject(priv, (hypervObject *) os);
+    virBufferFreeAndReset(&query);
+    return result;
+}
 
 static virDrvOpenStatus
 hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
@@ -142,6 +165,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     char *password = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
+    char *winVersion = NULL;
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
@@ -239,6 +263,18 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     /* FIXME: Currently only basic authentication is supported  */
     wsman_transport_set_auth_method(priv->client, "basic");
 
+    /* init xmlopt for domain XML */
+    priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
+
+    /* determine what version of Windows we're dealing with */
+    winVersion = hypervNodeGetWindowsVersion(priv);
+    VIR_DEBUG("Windows version reported as '%s'", winVersion);
+    if (!winVersion) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not determine Windows version"));
+        goto cleanup;
+    }
+
     /* Check if the connection can be established and if the server has the
      * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
      * succeeds than the connection has been established. If the returned list
@@ -256,10 +292,16 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
-
-    /* init xmlopt for domain XML */
-    priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
+    if (STRPREFIX(winVersion, HYPERV_VERSION_2008)) {
+        hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
+    } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012) ||
+               STRPREFIX(winVersion, HYPERV_VERSION_2016)) {
+        // hypervSetupV2(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
+    } else {
+        // whatever this is, it's not supported
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Unsupported Windows version"));
+        goto cleanup;
+    }
 
     conn->privateData = priv;
     priv = NULL;
