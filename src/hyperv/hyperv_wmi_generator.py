@@ -3,6 +3,7 @@
 #
 # hyperv_wmi_generator.py: generates most of the WMI type mapping code
 #
+# Copyright (C) 2017 Datto Inc.
 # Copyright (C) 2011 Matthias Bolte <matthias.bolte@googlemail.com>
 #
 # This library is free software; you can redistribute it and/or
@@ -31,20 +32,22 @@ separator = "/* " + ("* " * 37) + "*\n"
 
 
 class Class:
-    def __init__(self, name, properties):
+    def __init__(self, name, properties, version=""):
         self.name = name
         self.properties = properties
+        self.version = version
+        self.full_name = (self.name + "_V" + self.version) if self.version is not "" else self.name
 
 
     def generate_header(self):
-        name_upper = self.name.upper()
+        name_upper = self.full_name.upper()
 
         header = separator
-        header += " * %s\n" % self.name
+        header += " * %s\n" % self.full_name
         header += " */\n"
         header += "\n"
-        header += "int hypervGet%sList(hypervPrivate *priv, virBufferPtr query, %s **list);\n" \
-                  % (self.name.replace("_", ""), self.name)
+        header += "int hyperv%sGet%sList(hypervPrivate *priv, virBufferPtr query, %s **list);\n" \
+                  % (self.version, self.name.replace("_", ""), self.full_name)
         header += "\n"
         header += "\n"
         header += "\n"
@@ -53,17 +56,17 @@ class Class:
 
 
     def generate_classes_typedef(self):
-        typedef = "typedef struct _%s_Data %s_Data;\n" % (self.name, self.name)
-        typedef += "typedef struct _%s %s;\n" % (self.name, self.name)
+        typedef = "typedef struct _%s_Data %s_Data;\n" % (self.full_name, self.full_name)
+        typedef += "typedef struct _%s %s;\n" % (self.full_name, self.full_name)
 
         return typedef
 
 
     def generate_classes_header(self):
-        name_upper = self.name.upper()
+        name_upper = self.full_name.upper()
 
         header = separator
-        header += " * %s\n" % self.name
+        header += " * %s\n" % self.full_name
         header += " */\n"
         header += "\n"
         header += "#define %s_RESOURCE_URI \\\n" % name_upper
@@ -80,19 +83,19 @@ class Class:
         header += "#define %s_WQL_SELECT \\\n" % name_upper
         header += "    \"select * from %s \"\n" % self.name
         header += "\n"
-        header += "struct _%s_Data {\n" % self.name
+        header += "struct _%s_Data {\n" % self.full_name
 
         for property in self.properties:
             header += property.generate_classes_header()
 
         header += "};\n"
         header += "\n"
-        header += "SER_DECLARE_TYPE(%s_Data);\n" % self.name
+        header += "SER_DECLARE_TYPE(%s_Data);\n" % self.full_name
         header += "\n"
-        header += "struct _%s {\n" % self.name
+        header += "struct _%s {\n" % self.full_name
         header += "    XmlSerializerInfo *serializerInfo;\n"
-        header += "    %s_Data *data;\n" % self.name
-        header += "    %s *next;\n" % self.name
+        header += "    %s_Data *data;\n" % self.full_name
+        header += "    %s *next;\n" % self.full_name
         header += "};\n"
         header += "\n"
         header += "\n"
@@ -102,23 +105,23 @@ class Class:
 
 
     def generate_source(self):
-        name_upper = self.name.upper()
+        name_upper = self.full_name.upper()
 
         source = separator
         source += " * %s\n" % self.name
         source += " */\n"
         source += "\n"
         source += "int\n"
-        source += "hypervGet%sList(hypervPrivate *priv, virBufferPtr query, %s **list)\n" \
-                  % (self.name.replace("_", ""), self.name)
+        source += "hyperv%sGet%sList(hypervPrivate *priv, virBufferPtr query, %s **list)\n" \
+                  % (self.version, self.name.replace("_", ""), self.full_name)
         source += "{\n"
 
         if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
             source += "    return hypervEnumAndPull(priv, query, ROOT_CIMV2,\n"
         else:
-            source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION,\n"
+            source += "    return hypervEnumAndPull(priv, query, ROOT_VIRTUALIZATION_V%s,\n" % self.version
 
-        source += "                             %s_Data_TypeInfo,\n" % self.name
+        source += "                             %s_Data_TypeInfo,\n" % self.full_name
         source += "                             %s_RESOURCE_URI,\n" % name_upper
         source += "                             %s_CLASSNAME,\n" % name_upper
         source += "                             (hypervObject **)list);\n"
@@ -134,15 +137,15 @@ class Class:
         name_upper = self.name.upper()
 
         source = separator
-        source += " * %s\n" % self.name
+        source += " * %s\n" % self.full_name
         source += " */\n"
         source += "\n"
-        source += "SER_START_ITEMS(%s_Data)\n" % self.name
+        source += "SER_START_ITEMS(%s_Data)\n" % self.full_name
 
         for property in self.properties:
-            source += property.generate_classes_source(self.name)
+            source += property.generate_classes_source(self.full_name)
 
-        source += "SER_END_ITEMS(%s_Data);\n" % self.name
+        source += "SER_END_ITEMS(%s_Data);\n" % self.full_name
         source += "\n"
         source += "\n"
         source += "\n"
@@ -155,7 +158,7 @@ class Class:
         header += " * %s\n" % self.name
         header += " */\n"
         header += "\n"
-        header += "CimTypes cimTypes_%s[] = {\n" % self.name
+        header += "CimTypes cimTypes_%s[] = {\n" % self.full_name
         for property in self.properties:
             header += property.generate_cimtype_property()
             header += ",\n"
@@ -163,8 +166,8 @@ class Class:
         return header
 
     def generate_cimtypes_cimclasses(self):
-        header = "    { \"%s" % self.name
-        header += "\", cimTypes_%s" % self.name
+        header = "    { \"%s" % self.full_name
+        header += "\", cimTypes_%s" % self.full_name
         header += " },\n"
 
         return header
@@ -252,6 +255,14 @@ def parse_class(block):
 
     name = header_items[1]
 
+    if name.endswith("_v2"):
+        version = "2"
+    else:
+        version = "1"
+
+    if name.startswith("Win32_") or name.startswith("CIM_"):
+        version = ""
+
     properties = []
 
     for line in block[1:]:
@@ -270,7 +281,7 @@ def parse_class(block):
         properties.append(Property(type=items[0], name=items[1],
                                    is_array=is_array))
 
-    return Class(name=name, properties=properties)
+    return Class(name=name, properties=properties, version=version)
 
 
 def generate_cimtypes_header_header():

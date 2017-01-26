@@ -40,7 +40,7 @@ VIR_LOG_INIT("hyperv.hyperv_network_api_v1")
 /* utility functions */
 static int
 hyperv1MsvmVirtualSwitchToNetwork(virConnectPtr conn,
-        Msvm_VirtualSwitch *virtualSwitch, virNetworkPtr *network)
+        Msvm_VirtualSwitch_V1 *virtualSwitch, virNetworkPtr *network)
 {
     unsigned char uuid[VIR_UUID_BUFLEN];
     char *rawUuid = NULL;
@@ -81,15 +81,15 @@ hyperv1ConnectListNetworks(virConnectPtr conn, char **const names, int maxnames)
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch *switches = NULL, *entry = NULL;
+    Msvm_VirtualSwitch_V1 *switches = NULL, *entry = NULL;
 
     if (maxnames <= 0)
         return 0;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where HealthState = 5");
 
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &switches) < 0)
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &switches) < 0)
         goto cleanup;
 
     entry = switches;
@@ -122,12 +122,12 @@ hyperv1ConnectNumOfNetworks(virConnectPtr conn)
     int result = -1, count = 0;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch *virtualSwitch = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where HealthState = 5");
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
         goto cleanup;
     }
 
@@ -151,15 +151,15 @@ hyperv1ConnectListDefinedNetworks(virConnectPtr conn, char **const names, int ma
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch *virtualSwitch = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
 
     if (maxnames <= 0)
         return 0;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where HealthState <> %d", 5);
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
         goto cleanup;
     }
 
@@ -196,12 +196,12 @@ hyperv1NetworkLookupByName(virConnectPtr conn, const char *name)
     virNetworkPtr network = NULL;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch *virtualSwitch = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Description = \"%s\" and ElementName = \"%s\"",
                       "Microsoft Virtual Switch", name);
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &virtualSwitch) < 0) {
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitch) < 0) {
         goto cleanup;
     }
     if (virtualSwitch == NULL) {
@@ -225,12 +225,12 @@ hyperv1ConnectNumOfDefinedNetworks(virConnectPtr conn)
     int result = -1, count = 0;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch *virtualSwitch = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
+    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where HealthState <> %d", 5);
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0) {
         goto cleanup;
     }
 
