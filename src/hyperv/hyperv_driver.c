@@ -164,7 +164,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     char *username = NULL;
     char *password = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     char *winVersion = NULL;
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -276,14 +276,14 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     }
 
     /* Check if the connection can be established and if the server has the
-     * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
+     * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
      * succeeds than the connection has been established. If the returned list
      * is empty than the server isn't a Hyper-V server. */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem == NULL) {

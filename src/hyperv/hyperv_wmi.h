@@ -35,6 +35,12 @@
 #define ROOT_VIRTUALIZATION \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
 
+#define ROOT_VIRTUALIZATION_V1 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
+
+#define ROOT_VIRTUALIZATION_V2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/*"
+
 typedef struct _hypervObject hypervObject;
 
 int hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
@@ -128,83 +134,7 @@ int hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query,
 
 void hypervFreeObject(hypervPrivate *priv, hypervObject *object);
 
-
-
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
- * CIM/Msvm_ReturnCode
- */
-
-enum _CIM_ReturnCode {
-    CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR = 0,
-    CIM_RETURNCODE_NOT_SUPPORTED = 1,
-    CIM_RETURNCODE_UNKNOWN_ERROR = 2,
-    CIM_RETURNCODE_CANNOT_COMPLETE_WITHIN_TIMEOUT_PERIOD = 3,
-    CIM_RETURNCODE_FAILED = 4,
-    CIM_RETURNCODE_INVALID_PARAMETER = 5,
-    CIM_RETURNCODE_IN_USE = 6,
-    CIM_RETURNCODE_TRANSITION_STARTED = 4096,
-    CIM_RETURNCODE_INVALID_STATE_TRANSITION = 4097,
-    CIM_RETURNCODE_TIMEOUT_PARAMETER_NOT_SUPPORTED = 4098,
-    CIM_RETURNCODE_BUSY = 4099,
-};
-
-enum _Msvm_ReturnCode {
-    MSVM_RETURNCODE_FAILED = 32768,
-    MSVM_RETURNCODE_ACCESS_DENIED = 32769,
-    MSVM_RETURNCODE_NOT_SUPPORTED = 32770,
-    MSVM_RETURNCODE_STATUS_IS_UNKNOWN = 32771,
-    MSVM_RETURNCODE_TIMEOUT = 32772,
-    MSVM_RETURNCODE_INVALID_PARAMETER = 32773,
-    MSVM_RETURNCODE_SYSTEM_IS_IN_USE = 32774,
-    MSVM_RETURNCODE_INVALID_STATE_FOR_THIS_OPERATION = 32775,
-    MSVM_RETURNCODE_INCORRECT_DATA_TYPE = 32776,
-    MSVM_RETURNCODE_SYSTEM_IS_NOT_AVAILABLE = 32777,
-    MSVM_RETURNCODE_OUT_OF_MEMORY = 32778,
-};
-
 const char *hypervReturnCodeToString(int returnCode);
-
-
-
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
- * Msvm_ComputerSystem
- */
-
-int hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
-                                                     int requestedState);
-
-int hypervMsvmComputerSystemEnabledStateToDomainState
-      (Msvm_ComputerSystem *computerSystem);
-
-bool hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
-                                      bool *in_transition);
-
-int hypervMsvmComputerSystemToDomain(virConnectPtr conn,
-                                     Msvm_ComputerSystem *computerSystem,
-                                     virDomainPtr *domain);
-
-int hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
-                                       Msvm_ComputerSystem **computerSystem);
-
-
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
- * Msvm_ResourceAllocationSettingData
- */
-
-/* https://msdn.microsoft.com/en-us/library/cc136877(v=vs.85).aspx */
-enum _Msvm_ResourceAllocationSettingData_ResourceType {
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_OTHER = 1,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER = 5,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA = 6,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_ETHERNET_ADAPTER = 10,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY = 14,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_CD_DRIVE = 15,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DVD_DRIVE = 16,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_SERIAL_PORT = 17,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT = 21,
-    MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK = 22,
-};
-
 
 # include "hyperv_wmi.generated.h"
 

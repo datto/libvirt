@@ -60,7 +60,7 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     virBuffer xpath_expr_buf = VIR_BUFFER_INITIALIZER;
     client_opt_t *options = NULL;
     WsXmlDocH response = NULL;
-    Msvm_ConcreteJob *job = NULL;
+    Msvm_ConcreteJob_V1 *job = NULL;
     int jobState = -1;
     bool completed = false;
 
@@ -116,7 +116,7 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
             goto cleanup;
         }
 
-        /* Get Msvm_ConcreteJob object */
+        /* Get Msvm_ConcreteJob_V1 object */
         instanceID = ws_xml_get_xpath_value(response, xpath_expr_string);
         if (!instanceID) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -126,10 +126,10 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
 
         /* Poll every 100ms until the job completes or fails */
         while (!completed) {
-            virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
+            virBufferAddLit(&query, MSVM_CONCRETEJOB_V1_WQL_SELECT);
             virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
 
-            if (hypervGetMsvmConcreteJobList(priv, &query, &job) < 0) {
+            if (hyperv1GetMsvmConcreteJobList(priv, &query, &job) < 0) {
                 goto cleanup;
             }
 
@@ -143,21 +143,21 @@ hyperv1InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
             /* do things depending on the state */
             jobState = job->data->JobState;
             switch(jobState) {
-                case MSVM_CONCRETEJOB_JOBSTATE_NEW:
-                case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
-                case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
-                case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_NEW:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_STARTING:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_RUNNING:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_SHUTTING_DOWN:
                     hypervFreeObject(priv, (hypervObject *) job);
                     job = NULL;
                     usleep(100 * 1000); /* sleep 100 ms */
                     continue;
-                case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_COMPLETED:
                     completed = true;
                     break;
-                case MSVM_CONCRETEJOB_JOBSTATE_TERMINATED:
-                case MSVM_CONCRETEJOB_JOBSTATE_KILLED:
-                case MSVM_CONCRETEJOB_JOBSTATE_EXCEPTION:
-                case MSVM_CONCRETEJOB_JOBSTATE_SERVICE:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_TERMINATED:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_KILLED:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_EXCEPTION:
+                case MSVM_CONCRETEJOB_V1_JOBSTATE_SERVICE:
                     goto cleanup;
                 default:
                     virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -305,18 +305,18 @@ cleanup:
 
 static int
 hyperv1GetActiveVirtualSystemList(hypervPrivate *priv,
-        Msvm_ComputerSystem **computerSystemList)
+        Msvm_ComputerSystem_V1 **computerSystemList)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
     virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_ACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0) {
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0) {
         goto cleanup;
     }
 
@@ -330,18 +330,18 @@ cleanup:
 /* gets all the vms including the ones that are marked inactive. */
 static int
 hyperv1GetInactiveVirtualSystemList(hypervPrivate *priv,
-        Msvm_ComputerSystem **list)
+        Msvm_ComputerSystem_V1 **list)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
     virBufferAddLit(&query, "and ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_INACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, list) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, list) < 0)
         goto cleanup;
 
     if (*list == NULL)
@@ -361,9 +361,9 @@ hyperv1GetPhysicalSystemList(hypervPrivate *priv,
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
 
     if (hypervGetWin32ComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
@@ -384,17 +384,17 @@ cleanup:
 
 static int
 hyperv1GetVirtualSystemByID(hypervPrivate *priv, int id,
-        Msvm_ComputerSystem **computerSystemList)
+        Msvm_ComputerSystem_V1 **computerSystemList)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and ProcessID = %d", id);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
 
     if (*computerSystemList == NULL)
@@ -408,17 +408,17 @@ cleanup:
 
 static int
 hyperv1GetVirtualSystemByUUID(hypervPrivate *priv, const char *uuid,
-        Msvm_ComputerSystem **computerSystemList)
+        Msvm_ComputerSystem_V1 **computerSystemList)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and Name = \"%s\"", uuid);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
 
     if (*computerSystemList == NULL)
@@ -434,17 +434,17 @@ cleanup:
 
 static int
 hyperv1GetVirtualSystemByName(hypervPrivate *priv, const char *name,
-        Msvm_ComputerSystem **computerSystemList)
+        Msvm_ComputerSystem_V1 **computerSystemList)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and ElementName = \"%s\"", name);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
 
     if (*computerSystemList == NULL)
@@ -459,12 +459,12 @@ cleanup:
 
 static int
 hyperv1GetVSSDFromUUID(hypervPrivate *priv, const char *uuid,
-        Msvm_VirtualSystemSettingData **data)
+        Msvm_VirtualSystemSettingData_V1 **data)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    /* Get Msvm_VirtualSystemSettingData */
+    /* Get Msvm_VirtualSystemSettingData_V1 */
     virBufferAsprintf(&query,
             "associators of "
             "{Msvm_ComputerSystem.CreationClassname=\"Msvm_ComputerSystem\","
@@ -473,7 +473,7 @@ hyperv1GetVSSDFromUUID(hypervPrivate *priv, const char *uuid,
             "ResultClass = Msvm_VirtualSystemSettingData",
             uuid);
 
-    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query, data) < 0)
+    if (hyperv1GetMsvmVirtualSystemSettingDataList(priv, &query, data) < 0)
         goto cleanup;
 
     if (*data == NULL)
@@ -488,12 +488,12 @@ cleanup:
 
 static int
 hyperv1GetProcSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
-        Msvm_ProcessorSettingData **data)
+        Msvm_ProcessorSettingData_V1 **data)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    /* Get Msvm_ProcessorSettingData */
+    /* Get Msvm_ProcessorSettingData_V1 */
     virBufferAsprintf(&query,
             "associators of "
             "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
@@ -501,7 +501,7 @@ hyperv1GetProcSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
             "ResultClass = Msvm_ProcessorSettingData",
             id);
 
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query, data) < 0)
+    if (hyperv1GetMsvmProcessorSettingDataList(priv, &query, data) < 0)
         goto cleanup;
 
     if (*data == NULL)
@@ -516,12 +516,12 @@ cleanup:
 
 static int
 hyperv1GetMemSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
-        Msvm_MemorySettingData **data)
+        Msvm_MemorySettingData_V1 **data)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    /* Get Msvm_MemorySettingData */
+    /* Get Msvm_MemorySettingData_V1 */
     virBufferAsprintf(&query,
             "associators of "
             "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
@@ -529,7 +529,7 @@ hyperv1GetMemSDByVSSDInstanceId(hypervPrivate *priv, const char *id,
             "ResultClass = Msvm_MemorySettingData",
             id);
 
-    if (hypervGetMsvmMemorySettingDataList(priv, &query, data) < 0)
+    if (hyperv1GetMsvmMemorySettingDataList(priv, &query, data) < 0)
         goto cleanup;
 
     if (*data == NULL)
@@ -544,7 +544,7 @@ cleanup:
 
 static int
 hyperv1GetRASDByVSSDInstanceId(hypervPrivate *priv, const char *id,
-        Msvm_ResourceAllocationSettingData **data)
+        Msvm_ResourceAllocationSettingData_V1 **data)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
@@ -556,7 +556,7 @@ hyperv1GetRASDByVSSDInstanceId(hypervPrivate *priv, const char *id,
             "ResultClass = Msvm_ResourceAllocationSettingData",
             id);
 
-    if (hypervGetMsvmResourceAllocationSettingDataList(priv, &query, data) < 0)
+    if (hyperv1GetMsvmResourceAllocationSettingDataList(priv, &query, data) < 0)
         goto cleanup;
 
     if (*data == NULL)
@@ -571,7 +571,7 @@ cleanup:
 
 static int
 hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
-        const char *id, Msvm_SyntheticEthernetPortSettingData **out)
+        const char *id, Msvm_SyntheticEthernetPortSettingData_V1 **out)
 {
     int result = -1;
     virBuffer query = VIR_BUFFER_INITIALIZER;
@@ -583,7 +583,7 @@ hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
             "ResultClass = Msvm_SyntheticEthernetPortSettingData",
             id);
 
-    if (hypervGetMsvmSyntheticEthernetPortSettingDataList(priv, &query,
+    if (hyperv1GetMsvmSyntheticEthernetPortSettingDataList(priv, &query,
                 out) < 0)
         goto cleanup;
 
@@ -626,16 +626,16 @@ cleanup:
 }
 
 static int
-hyperv1GetHostSystem(hypervPrivate *priv, Msvm_ComputerSystem **system)
+hyperv1GetHostSystem(hypervPrivate *priv, Msvm_ComputerSystem_V1 **system)
 {
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, system) < 0)
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, system) < 0)
         goto cleanup;
 
     if (*system == NULL)
@@ -647,6 +647,289 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1InvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
+                                                 int requestedState)
+{
+    int result = -1;
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    WsXmlDocH response = NULL;
+    client_opt_t *options = NULL;
+    char *selector = NULL;
+    char *properties = NULL;
+    char *returnValue = NULL;
+    int returnCode;
+    char *instanceID = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_ConcreteJob_V1 *concreteJob = NULL;
+    bool completed = false;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (virAsprintf(&selector, "Name=%s&CreationClassName=Msvm_ComputerSystem",
+                    uuid_string) < 0 ||
+        virAsprintf(&properties, "RequestedState=%d", requestedState) < 0)
+        goto cleanup;
+
+    options = wsmc_options_init();
+
+    if (options == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not initialize options"));
+        goto cleanup;
+    }
+
+    wsmc_add_selectors_from_str(options, selector);
+    wsmc_add_prop_from_str(options, properties);
+
+    /* Invoke method */
+    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_V1_RESOURCE_URI,
+                                  options, "RequestStateChange", NULL);
+
+    if (hyperyVerifyResponse(priv->client, response, "invocation") < 0)
+        goto cleanup;
+
+    /* Check return value */
+    returnValue = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:ReturnValue");
+
+    if (returnValue == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not lookup %s for %s invocation"),
+                       "ReturnValue", "RequestStateChange");
+        goto cleanup;
+    }
+
+    if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse return code from '%s'"), returnValue);
+        goto cleanup;
+    }
+
+    if (returnCode == CIM_RETURNCODE_TRANSITION_STARTED) {
+        /* Get concrete job object */
+        instanceID = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:Job/a:ReferenceParameters/w:SelectorSet/w:Selector[@Name='InstanceID']");
+
+        if (instanceID == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Could not lookup %s for %s invocation"),
+                           "InstanceID", "RequestStateChange");
+            goto cleanup;
+        }
+
+        /* FIXME: Poll every 100ms until the job completes or fails. There
+         *        seems to be no other way than polling. */
+        while (!completed) {
+            virBufferAddLit(&query, MSVM_CONCRETEJOB_V1_WQL_SELECT);
+            virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+
+            if (hyperv1GetMsvmConcreteJobList(priv, &query, &concreteJob) < 0)
+                goto cleanup;
+
+            if (concreteJob == NULL) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Could not lookup %s for %s invocation"),
+                               "Msvm_ConcreteJob", "RequestStateChange");
+                goto cleanup;
+            }
+
+            switch (concreteJob->data->JobState) {
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_NEW:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_STARTING:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_RUNNING:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_SHUTTING_DOWN:
+                hypervFreeObject(priv, (hypervObject *)concreteJob);
+                concreteJob = NULL;
+
+                usleep(100 * 1000);
+                continue;
+
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_COMPLETED:
+                completed = true;
+                break;
+
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_TERMINATED:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_KILLED:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_EXCEPTION:
+              case MSVM_CONCRETEJOB_V1_JOBSTATE_SERVICE:
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Concrete job for %s invocation is in error state"),
+                               "RequestStateChange");
+                goto cleanup;
+
+              default:
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("Concrete job for %s invocation is in unknown state"),
+                               "RequestStateChange");
+                goto cleanup;
+            }
+        }
+    } else if (returnCode != CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Invocation of %s returned an error: %s (%d)"),
+                       "RequestStateChange", hypervReturnCodeToString(returnCode),
+                       returnCode);
+        goto cleanup;
+    }
+
+    result = 0;
+
+ cleanup:
+    if (options != NULL)
+        wsmc_options_destroy(options);
+
+    ws_xml_destroy_doc(response);
+    VIR_FREE(selector);
+    VIR_FREE(properties);
+    VIR_FREE(returnValue);
+    VIR_FREE(instanceID);
+    hypervFreeObject(priv, (hypervObject *)concreteJob);
+
+    return result;
+}
+
+static int
+hyperv1MsvmComputerSystemEnabledStateToDomainState
+  (Msvm_ComputerSystem_V1 *computerSystem)
+{
+    switch (computerSystem->data->EnabledState) {
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_UNKNOWN:
+        return VIR_DOMAIN_NOSTATE;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_ENABLED:
+        return VIR_DOMAIN_RUNNING;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_DISABLED:
+        return VIR_DOMAIN_SHUTOFF;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_PAUSED:
+        return VIR_DOMAIN_PAUSED;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SUSPENDED: /* managed save */
+        return VIR_DOMAIN_SHUTOFF;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_STARTING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SNAPSHOTTING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SAVING:
+        return VIR_DOMAIN_RUNNING;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_STOPPING:
+        return VIR_DOMAIN_SHUTDOWN;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_PAUSING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_RESUMING:
+        return VIR_DOMAIN_RUNNING;
+
+      default:
+        return VIR_DOMAIN_NOSTATE;
+    }
+}
+
+static bool
+hyperv1IsMsvmComputerSystemActive(Msvm_ComputerSystem_V1 *computerSystem,
+                                 bool *in_transition)
+{
+    if (in_transition != NULL)
+        *in_transition = false;
+
+    switch (computerSystem->data->EnabledState) {
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_UNKNOWN:
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_ENABLED:
+        return true;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_DISABLED:
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_PAUSED:
+        return true;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SUSPENDED: /* managed save */
+        return false;
+
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_STARTING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SNAPSHOTTING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SAVING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_STOPPING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_PAUSING:
+      case MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_RESUMING:
+        if (in_transition != NULL)
+            *in_transition = true;
+
+        return true;
+
+      default:
+        return false;
+    }
+}
+
+static int
+hyperv1MsvmComputerSystemToDomain(virConnectPtr conn,
+                                 Msvm_ComputerSystem_V1 *computerSystem,
+                                 virDomainPtr *domain)
+{
+    unsigned char uuid[VIR_UUID_BUFLEN];
+
+    if (domain == NULL || *domain != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
+        return -1;
+    }
+
+    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Could not parse UUID from string '%s'"),
+                       computerSystem->data->Name);
+        return -1;
+    }
+
+    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid);
+
+    if (*domain == NULL)
+        return -1;
+
+    if (hyperv1IsMsvmComputerSystemActive(computerSystem, NULL)) {
+        (*domain)->id = computerSystem->data->ProcessID;
+    } else {
+        (*domain)->id = -1;
+    }
+
+    return 0;
+}
+
+static int
+hyperv1MsvmComputerSystemFromDomain(virDomainPtr domain,
+                                   Msvm_ComputerSystem_V1 **computerSystem)
+{
+    hypervPrivate *priv = domain->conn->privateData;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+
+    if (computerSystem == NULL || *computerSystem != NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
+        return -1;
+    }
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
+    virBufferAddLit(&query, "where ");
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
+    virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
+
+    if (hyperv1GetMsvmComputerSystemList(priv, &query, computerSystem) < 0)
+        return -1;
+
+    if (*computerSystem == NULL) {
+        virReportError(VIR_ERR_NO_DOMAIN,
+                       _("No domain with UUID %s"), uuid_string);
+        return -1;
+    }
+
+    return 0;
+}
+
+/* General-purpose utility functions */
 virCapsPtr
 hyperv1CapsInit(hypervPrivate *priv)
 {
@@ -698,11 +981,11 @@ error:
 /* Virtual device functions */
 static int
 hyperv1GetDeviceParentRasdFromDeviceId(const char *parentDeviceId,
-        Msvm_ResourceAllocationSettingData *list,
-        Msvm_ResourceAllocationSettingData **out)
+        Msvm_ResourceAllocationSettingData_V1 *list,
+        Msvm_ResourceAllocationSettingData_V1 **out)
 {
     int result = -1;
-    Msvm_ResourceAllocationSettingData *entry = list;
+    Msvm_ResourceAllocationSettingData_V1 *entry = list;
     char *escapedDeviceId = NULL;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
     *out = NULL;
@@ -756,7 +1039,7 @@ cleanup:
 /* Functions for deserializing device entries */
 static int
 hyperv1DomainDefParseIDEController(virDomainDefPtr def,
-        Msvm_ResourceAllocationSettingData *ide ATTRIBUTE_UNUSED, int idx)
+        Msvm_ResourceAllocationSettingData_V1 *ide ATTRIBUTE_UNUSED, int idx)
 {
     int result = -1;
     virDomainControllerDefPtr ctrlr = NULL;
@@ -777,7 +1060,7 @@ cleanup:
 
 static int
 hyperv1DomainDefParseSCSIController(virDomainDefPtr def,
-        Msvm_ResourceAllocationSettingData *scsi ATTRIBUTE_UNUSED, int idx)
+        Msvm_ResourceAllocationSettingData_V1 *scsi ATTRIBUTE_UNUSED, int idx)
 {
     int result = -1;
     virDomainControllerDefPtr ctrlr = NULL;
@@ -799,9 +1082,9 @@ cleanup:
 
 static int
 hyperv1DomainDefParseIDEStorageExtent(virDomainDefPtr def, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData **ideControllers,
-        Msvm_ResourceAllocationSettingData *disk_parent,
-        Msvm_ResourceAllocationSettingData *disk_ctrlr)
+        Msvm_ResourceAllocationSettingData_V1 **ideControllers,
+        Msvm_ResourceAllocationSettingData_V1 *disk_parent,
+        Msvm_ResourceAllocationSettingData_V1 *disk_ctrlr)
 {
     int i = 0;
     int result = -1;
@@ -843,9 +1126,9 @@ cleanup:
 
 static int
 hyperv1DomainDefParseSCSIStorageExtent(virDomainDefPtr def, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData **scsiControllers,
-        Msvm_ResourceAllocationSettingData *disk_parent,
-        Msvm_ResourceAllocationSettingData *disk_ctrlr)
+        Msvm_ResourceAllocationSettingData_V1 **scsiControllers,
+        Msvm_ResourceAllocationSettingData_V1 *disk_parent,
+        Msvm_ResourceAllocationSettingData_V1 *disk_ctrlr)
 {
     int i = 0;
     int ctrlr_idx = -1;
@@ -905,11 +1188,11 @@ cleanup:
 
 static int
 hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
-        Msvm_ResourceAllocationSettingData *rasd)
+        Msvm_ResourceAllocationSettingData_V1 *rasd)
 {
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ResourceAllocationSettingData *entry = rasd;
-    Msvm_ResourceAllocationSettingData *disk_parent = NULL, *disk_ctrlr = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *entry = rasd;
+    Msvm_ResourceAllocationSettingData_V1 *disk_parent = NULL, *disk_ctrlr = NULL;
     virDomainDiskDefPtr disk = NULL;
     int result = -1;
     int scsi_idx = 0;
@@ -919,12 +1202,12 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
     char **hostResource = NULL;
     ssize_t found_lun = 0;
     int addr = -1, i = 0, ctrlr_idx = -1;
-    Msvm_ResourceAllocationSettingData *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
-    Msvm_ResourceAllocationSettingData *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData_V1 *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData_V1 *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
 
     while (entry != NULL) {
         switch (entry->data->ResourceType) {
-            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER:
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER:
                 ide_idx = entry->data->Address[0] - '0';
                 ideControllers[ide_idx] = entry;
                 if (hyperv1DomainDefParseIDEController(def, entry, ide_idx) < 0) {
@@ -932,7 +1215,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                     goto cleanup;
                 }
                 break;
-            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_PARALLEL_SCSI_HBA:
                 scsiControllers[scsi_idx++] = entry;
                 if (hyperv1DomainDefParseSCSIController(def, entry, scsi_idx-1) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR, "Could not parse SCSI controller");
@@ -950,7 +1233,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
     entry = rasd;
     while (entry != NULL) {
         if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_STORAGE_EXTENT) {
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_STORAGE_EXTENT) {
             /* reset some vars */
             disk = NULL;
             conn = NULL;
@@ -990,21 +1273,21 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
 
             /* controller-specific fields */
             switch (disk_ctrlr->data->ResourceType) {
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
+                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_PARALLEL_SCSI_HBA:
                     if (hyperv1DomainDefParseSCSIStorageExtent(def, disk,
                             scsiControllers, disk_parent, disk_ctrlr) < 0) {
                         goto cleanup;
                     }
                     break;
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER:
+                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER:
                     if (hyperv1DomainDefParseIDEStorageExtent(def, disk,
                                 ideControllers, disk_parent, disk_ctrlr) < 0) {
                         goto cleanup;
                     }
                     break;
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_OTHER:
+                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_OTHER:
                     if (disk_parent->data->ResourceType ==
-                            MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY) {
+                            MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_FLOPPY) {
                         if (hyperv1DomainDefParseFloppyStorageExtent(def, disk) < 0) {
                             goto cleanup;
                         }
@@ -1018,7 +1301,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                     goto cleanup;
             }
         } else if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_DISK) {
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_DISK) {
             /* code to parse physical disk drives, i.e. LUNs */
             if (STREQ(entry->data->ResourceSubType,
                         "Microsoft Physical Disk Drive")) {
@@ -1038,7 +1321,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                 hostResource = entry->data->HostResource.data;
 
                 /*
-                 * Use regex to lift DeviceID of backing Msvm_DiskDrive
+                 * Use regex to lift DeviceID of backing Msvm_DiskDrive_V1
                  * from hostResource
                  */
                 found_lun = virStringSearch(*hostResource,
@@ -1058,7 +1341,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                     goto cleanup;
 
                 switch (disk_ctrlr->data->ResourceType) {
-                    case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
+                    case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_PARALLEL_SCSI_HBA:
                         for (i = 0; i < HYPERV1_MAX_SCSI_CONTROLLERS; i++) {
                             if (disk_ctrlr == scsiControllers[i]) {
                                 ctrlr_idx = i;
@@ -1069,7 +1352,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         disk->dst = virIndexToDiskName(ctrlr_idx * 64 + addr, "sd");
                         disk->info.addr.drive.unit = ctrlr_idx * 64 + addr;
                         break;
-                    case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER:
+                    case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER:
                         for (i = 0; i < HYPERV1_MAX_IDE_CONTROLLERS; i++) {
                             if (disk_ctrlr == ideControllers[i]) {
                                 ctrlr_idx = i;
@@ -1113,13 +1396,13 @@ cleanup:
 
 static int
 hyperv1DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
-        Msvm_SyntheticEthernetPortSettingData *net,
+        Msvm_SyntheticEthernetPortSettingData_V1 *net,
         hypervPrivate *priv)
 {
     int result = -1;
     virDomainNetDefPtr ndef = NULL;
-    Msvm_SwitchPort *switchPort = NULL;
-    Msvm_VirtualSwitch *vSwitch = NULL;
+    Msvm_SwitchPort_V1 *switchPort = NULL;
+    Msvm_VirtualSwitch_V1 *vSwitch = NULL;
     char **switchPortConnection = NULL;
     char *switchPortConnectionEscaped = NULL;
     char *temp = NULL;
@@ -1146,7 +1429,7 @@ hyperv1DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
         goto success;
     }
 
-    /* Now we retrieve the associated Msvm_SwitchPort and Msvm_VirtualSwitch
+    /* Now we retrieve the associated Msvm_SwitchPort_V1 and Msvm_VirtualSwitch_V1
      * objects, and use all three to build the XML definition. */
     switchPortConnectionEscaped = virStringReplace(*switchPortConnection,
             "\\", "\\\\");
@@ -1157,7 +1440,7 @@ hyperv1DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
                       "select * from Msvm_SwitchPort where __PATH=\"%s\"",
                       switchPortConnectionEscaped);
 
-    if (hypervGetMsvmSwitchPortList(priv, &query, &switchPort) < 0) {
+    if (hyperv1GetMsvmSwitchPortList(priv, &query, &switchPort) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not retrieve switch port"));
         goto cleanup;
@@ -1174,7 +1457,7 @@ hyperv1DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
             "select * from Msvm_VirtualSwitch where Name=\"%s\"",
             switchPort->data->SystemName);
 
-    if (hypervGetMsvmVirtualSwitchList(priv, &query, &vSwitch) < 0) {
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &vSwitch) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not retrieve virtual switch"));
         goto cleanup;
@@ -1211,15 +1494,15 @@ cleanup:
 
 static int
 hyperv1DomainDefParseEthernet(virDomainPtr domain, virDomainDefPtr def,
-        Msvm_SyntheticEthernetPortSettingData *nets)
+        Msvm_SyntheticEthernetPortSettingData_V1 *nets)
 {
     int result = -1;
-    Msvm_SyntheticEthernetPortSettingData *entry = nets;
+    Msvm_SyntheticEthernetPortSettingData_V1 *entry = nets;
     hypervPrivate *priv = domain->conn->privateData;
 
     while (entry != NULL) {
         if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_ETHERNET_ADAPTER) {
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_ETHERNET_ADAPTER) {
             if (hyperv1DomainDefParseSyntheticEthernetAdapter(def, entry, priv) < 0)
                 goto cleanup;
         }
@@ -1234,18 +1517,18 @@ cleanup:
 
 static int
 hyperv1DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
-        virDomainDefPtr def, Msvm_ResourceAllocationSettingData *rasd)
+        virDomainDefPtr def, Msvm_ResourceAllocationSettingData_V1 *rasd)
 {
     int result = -1;
     int port_num = 0;
     char **conn = NULL;
     const char *srcPath = NULL;
-    Msvm_ResourceAllocationSettingData *entry = rasd;
+    Msvm_ResourceAllocationSettingData_V1 *entry = rasd;
     virDomainChrDefPtr serial = NULL;
 
     while (entry != NULL) {
         if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_SERIAL_PORT) {
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_SERIAL_PORT) {
             /* clear some vars */
             serial = NULL;
             port_num = 0;
@@ -1308,7 +1591,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     char *connection__PATH = NULL;
     unsigned char guid[VIR_UUID_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computer = NULL;
+    Msvm_ComputerSystem_V1 *computer = NULL;
     eprParam virtualSwitch_REF, ComputerSystem_REF;
     simpleParam virtualSwitch_Name, virtualSwitch_FriendlyName,
                 virtualSwitch_ScopeOfResidence;
@@ -1320,7 +1603,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
      * step 1: create virtual switch port
      * https://msdn.microsoft.com/en-us/library/cc136782(v=vs.85).aspx
      */
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", net->data.network.name);
     virtualSwitch_REF.query = &query;
     virtualSwitch_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1357,7 +1640,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
         goto cleanup;
 
     if (hyperv1InvokeMethod(priv, params, 4, "CreateSwitchPort",
-                MSVM_VIRTUALSWITCHMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSWITCHMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 vswitch_selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not create port for virtual switch '%s'"),
@@ -1377,7 +1660,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     virtualSystemIdentifiers = virBufferContentAndReset(&query);
 
     /* build the __PATH variable of the switch port */
-    if (hypervMsvmComputerSystemFromDomain(domain, &computer) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computer) < 0)
         goto cleanup;
     if (virAsprintf(&connection__PATH, "\\\\%s\\root\\virtualization:"
                 "Msvm_SwitchPort.CreationClassName=\"Msvm_SwitchPort\","
@@ -1389,7 +1672,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     /* build the ComputerSystem_REF parameter */
     virUUIDFormat(domain->uuid, uuid_string);
     virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
     ComputerSystem_REF.query = &query;
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1407,7 +1690,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     NewResources[3].val = "10";
     NewResources[4].name = "ResourceSubType";
     NewResources[4].val = "Microsoft Synthetic Ethernet Port";
-    ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_CLASSNAME;
+    ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V1_CLASSNAME;
     ResourceSettingData.prop_t = NewResources;
     ResourceSettingData.nbProps = 5;
 
@@ -1424,7 +1707,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
 
     /* invoke */
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 managementservice_selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
         goto cleanup;
@@ -1452,9 +1735,9 @@ hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;
     char *com_string = NULL;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_ResourceAllocationSettingData *rasd = NULL;
-    Msvm_ResourceAllocationSettingData *entry = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *rasd = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *entry = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     eprParam ComputerSystem_REF;
     embeddedParam ResourceSettingData;
@@ -1476,7 +1759,7 @@ hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     entry = rasd;
     while (entry != NULL) {
         if ((entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_SERIAL_PORT) &&
+                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_SERIAL_PORT) &&
                 STREQ(entry->data->ElementName, com_string)) {
             /* found our com port */
             break;
@@ -1487,8 +1770,8 @@ hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     if (entry == NULL)
         goto cleanup;
 
-    /* build Msvm_ComputerSystem ref */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    /* build Msvm_ComputerSystem_V1 ref */
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
     ComputerSystem_REF.query = &query;
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1508,7 +1791,7 @@ hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     props[2].val = "17"; /* shouldn't be hardcoded but whatever */
     props[3].name = "ResourceSubType";
     props[3].val = entry->data->ResourceSubType;
-    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     ResourceSettingData.prop_t = props;
 
     /* build xml params object */
@@ -1522,7 +1805,7 @@ hyperv1DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     params[1].param = &ResourceSettingData;
 
     if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add serial device"));
         goto cleanup;
@@ -1559,7 +1842,7 @@ hyperv1DomainCreateSCSIController(virDomainPtr domain)
 
     /* prepare ComputerSystem_REF param */
     virUUIDFormat(domain->uuid, uuid_string);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
     ComputerSystem_REF.query = &query;
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1574,7 +1857,7 @@ hyperv1DomainCreateSCSIController(virDomainPtr domain)
     props[2].name = "ResourceSubType";
     props[2].val = "Microsoft Synthetic SCSI Controller";
 
-    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     ResourceSettingData.prop_t = props;
     ResourceSettingData.nbProps = 3;
 
@@ -1590,7 +1873,7 @@ hyperv1DomainCreateSCSIController(virDomainPtr domain)
 
     /* invoke */
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
         goto cleanup;
@@ -1612,7 +1895,7 @@ cleanup:
  */
 static int
 hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+        Msvm_ResourceAllocationSettingData_V1 *controller, const char *hostname)
 {
     int result = -1;
     const char *selector =
@@ -1639,7 +1922,7 @@ hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     /* First we add the settings object */
 
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
     eprparam1.query = &query;
     eprparam1.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1663,7 +1946,7 @@ hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[2].val = "22";
     props[3].name = "ResourceSubType";
     props[3].val = "Microsoft Synthetic Disk Drive";
-    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam1.prop_t = props;
 
     /* create xml params */
@@ -1677,7 +1960,7 @@ hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam1;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, &response) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
         goto cleanup;
@@ -1716,11 +1999,11 @@ hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[2].val = "21";
     props[3].name = "ResourceSubType";
     props[3].val = "Microsoft Virtual Hard Disk";
-    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam2.prop_t = props;
 
     virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
     eprparam2.query = &query;
     eprparam2.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1737,7 +2020,7 @@ hyperv1DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam2;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
         goto cleanup;
@@ -1759,7 +2042,7 @@ cleanup:
 
 static int
 hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+        Msvm_ResourceAllocationSettingData_V1 *controller, const char *hostname)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
@@ -1802,7 +2085,7 @@ hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     }
 
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
     ComputerSystem_REF.query = &query;
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1821,7 +2104,7 @@ hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[3].val = "Microsoft Physical Disk Drive";
     props[4].name = "HostResource";
     props[4].val = hostResource;
-    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = props;
 
     /* create xml param */
@@ -1835,7 +2118,7 @@ hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add LUN"));
         goto cleanup;
@@ -1855,7 +2138,7 @@ cleanup:
 
 static int
 hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+        Msvm_ResourceAllocationSettingData_V1 *controller, const char *hostname)
 {
     int result = -1;
     const char *selector =
@@ -1880,7 +2163,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
             disk->info.addr.drive.controller, disk->bus);
 
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
     ComputerSystem_REF.query = &query;
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -1904,7 +2187,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[2].val = "16";
     props[3].name = "ResourceSubType";
     props[3].val = "Microsoft Synthetic DVD Drive";
-    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam1.prop_t = props;
 
     if (VIR_ALLOC_N(params, 2) < 0)
@@ -1917,7 +2200,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam1;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, &response) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add DVD drive"));
         goto cleanup;
@@ -1949,7 +2232,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
 
     /* refresh buffer */
     virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
 
     /* prepare embedded param 2 */
@@ -1965,7 +2248,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[2].val = "21";
     props[3].name = "ResourceSubType";
     props[3].val = "Microsoft Virtual CD/DVD Disk";
-    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam2.prop_t = props;
 
     /* prepare XML params */
@@ -1980,7 +2263,7 @@ hyperv1DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam2;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
         goto cleanup;
@@ -2003,7 +2286,7 @@ cleanup:
 
 static int
 hyperv1DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData *driveSettings, const char *hostname)
+        Msvm_ResourceAllocationSettingData_V1 *driveSettings, const char *hostname)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
@@ -2041,10 +2324,10 @@ hyperv1DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
     props[2].val = "21";
     props[3].name = "ResourceSubType";
     props[3].val = "Microsoft Virtual Floppy Disk";
-    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_CLASSNAME;
+    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = props;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -2060,7 +2343,7 @@ hyperv1DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
     params[1].param = &embeddedparam;
 
     if (hyperv1InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add floppy disk"));
         goto cleanup;
@@ -2078,7 +2361,7 @@ cleanup:
 
 static int
 hyperv1DomainAttachStorageVolume(virDomainPtr domain, virDomainDiskDefPtr disk,
-        Msvm_ResourceAllocationSettingData *controller, const char *hostname)
+        Msvm_ResourceAllocationSettingData_V1 *controller, const char *hostname)
 {
     switch (disk->device) {
         case VIR_DOMAIN_DISK_DEVICE_DISK:
@@ -2105,12 +2388,12 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
     int ctrlr_idx = -1;
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_ResourceAllocationSettingData *rasd = NULL;
-    Msvm_ResourceAllocationSettingData *entry = NULL;
-    Msvm_ResourceAllocationSettingData *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
-    Msvm_ResourceAllocationSettingData *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
-    Msvm_ResourceAllocationSettingData *floppySettings = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *rasd = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *entry = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData_V1 *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
+    Msvm_ResourceAllocationSettingData_V1 *floppySettings = NULL;
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -2135,13 +2418,13 @@ hyperv1DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
     entry = rasd;
     while (entry != NULL) {
         switch (entry->data->ResourceType) {
-            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER:
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER:
                 ideControllers[entry->data->Address[0] - '0'] = entry;
                 break;
-            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA:
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_PARALLEL_SCSI_HBA:
                 scsiControllers[num_scsi_controllers++] = entry;
                 break;
-            case MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY:
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_FLOPPY:
                 floppySettings = entry;
                 break;
         }
@@ -2280,13 +2563,13 @@ hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED)
     int result = -1;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ProcessorSettingData *processorSettingData = NULL;
+    Msvm_ProcessorSettingData_V1 *processorSettingData = NULL;
 
     /* Get max processors definition */
     virBufferAddLit(&query, "SELECT * FROM Msvm_ProcessorSettingData "
             "WHERE InstanceID LIKE 'Microsoft:Definition%Maximum'");
 
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
+    if (hyperv1GetMsvmProcessorSettingDataList(priv, &query,
                 &processorSettingData) < 0) {
         goto cleanup;
     }
@@ -2392,8 +2675,8 @@ hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystemList = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     int count = 0;
 
     if (maxids == 0)
@@ -2423,8 +2706,8 @@ hyperv1ConnectNumOfDomains(virConnectPtr conn)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystemList = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     int count = 0;
 
     if (hyperv1GetActiveVirtualSystemList(priv, &computerSystemList) < 0)
@@ -2457,8 +2740,8 @@ hyperv1DomainCreateXML(virConnectPtr conn, const char *xmlDesc,
         return NULL;
 
     /* start the domain */
-    if (hypervInvokeMsvmComputerSystemRequestStateChange(domain,
-                MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED) < 0) {
+    if (hyperv1InvokeMsvmComputerSystemRequestStateChange(domain,
+                MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_ENABLED) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not start domain %s"), domain->name);
         return domain;
@@ -2482,14 +2765,14 @@ hyperv1DomainLookupByID(virConnectPtr conn, int id)
 {
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     if (hyperv1GetVirtualSystemByID(priv, id, &computerSystem) < 0) {
         virReportError(VIR_ERR_NO_DOMAIN, _("No domain with ID %d"), id);
         goto cleanup;
     }
 
-    hypervMsvmComputerSystemToDomain(conn, computerSystem, &domain);
+    hyperv1MsvmComputerSystemToDomain(conn, computerSystem, &domain);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2503,7 +2786,7 @@ hyperv1DomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virUUIDFormat(uuid, uuid_string);
 
@@ -2513,7 +2796,7 @@ hyperv1DomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
         goto cleanup;
     }
 
-    hypervMsvmComputerSystemToDomain(conn, computerSystem, &domain);
+    hyperv1MsvmComputerSystemToDomain(conn, computerSystem, &domain);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2526,7 +2809,7 @@ hyperv1DomainLookupByName(virConnectPtr conn, const char *name)
 {
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     if (hyperv1GetVirtualSystemByName(priv, name, &computerSystem) < 0) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
@@ -2534,7 +2817,7 @@ hyperv1DomainLookupByName(virConnectPtr conn, const char *name)
         goto cleanup;
     }
 
-    hypervMsvmComputerSystemToDomain(conn, computerSystem, &domain);
+    hyperv1MsvmComputerSystemToDomain(conn, computerSystem, &domain);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2547,20 +2830,20 @@ hyperv1DomainSuspend(virDomainPtr domain)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem->data->EnabledState !=
-        MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED) {
+        MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_ENABLED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not active"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_PAUSED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_PAUSED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2573,20 +2856,20 @@ hyperv1DomainResume(virDomainPtr domain)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem->data->EnabledState !=
-        MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED) {
+        MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_PAUSED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not paused"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_ENABLED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2605,22 +2888,22 @@ hyperv1DomainShutdownFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     bool in_transition = false;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (!hypervIsMsvmComputerSystemActive(computerSystem, &in_transition) || in_transition) {
+    if (!hyperv1IsMsvmComputerSystemActive(computerSystem, &in_transition) || in_transition) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                 _("Domain is not active or in state transition"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange(domain,
-            MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange(domain,
+            MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_ENABLED);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) computerSystem);
@@ -2632,15 +2915,15 @@ hyperv1DomainReboot(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange(domain,
-            MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_REBOOT);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange(domain,
+            MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_REBOOT);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) computerSystem);
@@ -2652,23 +2935,23 @@ hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     bool in_transition = false;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (!hypervIsMsvmComputerSystemActive(computerSystem, &in_transition) ||
+    if (!hyperv1IsMsvmComputerSystemActive(computerSystem, &in_transition) ||
         in_transition) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not active or is in state transition"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_DISABLED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -2696,8 +2979,8 @@ hyperv1DomainGetMaxMemory(virDomainPtr domain)
     unsigned long long result = 0;
     bool success = false;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_MemorySettingData *mem_sd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_MemorySettingData_V1 *mem_sd = NULL;
     hypervPrivate *priv = domain->conn->privateData;
 
     virUUIDFormat(domain->uuid, uuid_string);
@@ -2732,8 +3015,8 @@ hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     properties_t *tab_props = NULL;
     eprParam eprparam;
     embeddedParam embeddedparam;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_MemorySettingData *mem_sd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_MemorySettingData_V1 *mem_sd = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     char *memory_str = NULL;
     const char *selector =
@@ -2750,7 +3033,7 @@ hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     virUUIDFormat(domain->uuid, uuid_string);
 
     /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -2785,7 +3068,7 @@ hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     params[1].param = &embeddedparam;
 
     result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-        MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL);
+        MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI, selector, NULL);
 
 cleanup:
     VIR_FREE(tab_props);
@@ -2817,8 +3100,8 @@ hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     eprParam eprparam;
     embeddedParam embeddedparam;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_MemorySettingData *mem_sd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_MemorySettingData_V1 *mem_sd = NULL;
     char *memory_str = NULL;
 
     /* memory has to passed as a multiple of 2mb */
@@ -2831,7 +3114,7 @@ hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     virUUIDFormat(domain->uuid, uuid_string);
 
     /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -2866,7 +3149,7 @@ hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     params[1].param = &embeddedparam;
 
     if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not set domain memory"));
         goto cleanup;
@@ -2890,17 +3173,17 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
-    Msvm_ProcessorSettingData *processorSettingData = NULL;
-    Msvm_MemorySettingData *memorySettingData = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData_V1 *virtualSystemSettingData = NULL;
+    Msvm_ProcessorSettingData_V1 *processorSettingData = NULL;
+    Msvm_MemorySettingData_V1 *memorySettingData = NULL;
 
     memset(info, 0, sizeof(*info));
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    /* Get Msvm_ComputerSystem */
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    /* Get Msvm_ComputerSystem_V1 */
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     if (hyperv1GetVSSDFromUUID(priv, uuid_string,
@@ -2933,7 +3216,7 @@ hyperv1DomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     }
 
     /* Fill struct */
-    info->state = hypervMsvmComputerSystemEnabledStateToDomainState(computerSystem);
+    info->state = hyperv1MsvmComputerSystemEnabledStateToDomainState(computerSystem);
     info->maxMem = memorySettingData->data->Limit * 1024; /* megabyte to kilobyte */
     info->memory = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
     info->nrVirtCpu = processorSettingData->data->VirtualQuantity;
@@ -2956,14 +3239,14 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    *state = hypervMsvmComputerSystemEnabledStateToDomainState(computerSystem);
+    *state = hyperv1MsvmComputerSystemEnabledStateToDomainState(computerSystem);
 
     if (reason != NULL)
         *reason = 0;
@@ -2983,8 +3266,8 @@ hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VideoHead *heads = NULL;
-    Msvm_SyntheticDisplayController *ctrlr = NULL;
+    Msvm_VideoHead_V1 *heads = NULL;
+    Msvm_SyntheticDisplayController_V1 *ctrlr = NULL;
     eprParam eprparam;
     simpleParam x_param, y_param;
     const char *selector =
@@ -3013,7 +3296,7 @@ hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     /* get current resolution of VM */
     virBufferAsprintf(&query, "select * from Msvm_SyntheticDisplayController "
                               "where SystemName = \"%s\"", uuid_string);
-    if (hypervGetMsvmSyntheticDisplayControllerList(priv, &query, &ctrlr) < 0)
+    if (hyperv1GetMsvmSyntheticDisplayControllerList(priv, &query, &ctrlr) < 0)
         goto thumbnail;
 
     if (ctrlr == NULL)
@@ -3030,7 +3313,7 @@ hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
             "where AssocClass = Msvm_VideoHeadOnController "
             "ResultClass = Msvm_VideoHead",
             ctrlr->data->DeviceID, uuid_string);
-    if (hypervGetMsvmVideoHeadList(priv, &query, &heads) < 0)
+    if (hyperv1GetMsvmVideoHeadList(priv, &query, &heads) < 0)
         goto thumbnail;
 
     if (heads != NULL) {
@@ -3039,7 +3322,7 @@ hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     }
 
 thumbnail:
-    /* Prepare EPR param - get Msvm_VirtualSystemSettingData */
+    /* Prepare EPR param - get Msvm_VirtualSystemSettingData_V1 */
     virBufferFreeAndReset(&query);
     virBufferAsprintf(&query,
             "associators of "
@@ -3070,7 +3353,7 @@ thumbnail:
     params[2].param = &eprparam;
 
     if (hyperv1InvokeMethod(priv, params, 3, "GetVirtualSystemThumbnailImage",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector,
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI, selector,
                 &ret_doc) < 0)
         goto cleanup;
 
@@ -3167,8 +3450,8 @@ hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_ProcessorSettingData *proc_sd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_ProcessorSettingData_V1 *proc_sd = NULL;
     hypervPrivate *priv = domain->conn->privateData;
     eprParam eprparam;
     embeddedParam embeddedparam;
@@ -3194,7 +3477,7 @@ hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     }
 
     /* prepare parameters */
-    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&buf, "where Name = \"%s\"", uuid_string);
     eprparam.query = &buf;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -3220,7 +3503,7 @@ hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     params[1].param = &embeddedparam;
 
     if (hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL) < 0)
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI, selector, NULL) < 0)
         goto cleanup;
 
     result = 0;
@@ -3242,9 +3525,9 @@ hyperv1DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_ProcessorSettingData *proc_sd = NULL;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_ProcessorSettingData_V1 *proc_sd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
 
     virCheckFlags(VIR_DOMAIN_VCPU_LIVE |
                   VIR_DOMAIN_VCPU_CONFIG |
@@ -3253,15 +3536,15 @@ hyperv1DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    /* Start by getting the Msvm_ComputerSystem */
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
+    /* Start by getting the Msvm_ComputerSystem_V1 */
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
         goto cleanup;
     }
 
     /* Check @flags to see if we are to query a running domain, and fail
      * if that domain is not running */
     if (flags & VIR_DOMAIN_VCPU_LIVE) {
-        if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED) {
+        if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_ENABLED) {
             virReportError(VIR_ERR_OPERATION_INVALID, "%s", _("Domain is not active"));
             goto cleanup;
         }
@@ -3361,12 +3644,12 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     hypervPrivate *priv = domain->conn->privateData;
     virDomainDefPtr def = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
-    Msvm_ProcessorSettingData *processorSettingData = NULL;
-    Msvm_MemorySettingData *memorySettingData = NULL;
-    Msvm_ResourceAllocationSettingData *rasd = NULL;
-    Msvm_SyntheticEthernetPortSettingData *nets = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData_V1 *virtualSystemSettingData = NULL;
+    Msvm_ProcessorSettingData_V1 *processorSettingData = NULL;
+    Msvm_MemorySettingData_V1 *memorySettingData = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *rasd = NULL;
+    Msvm_SyntheticEthernetPortSettingData_V1 *nets = NULL;
 
     /* Flags checked by virDomainDefFormat */
 
@@ -3375,8 +3658,8 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    /* Get Msvm_ComputerSystem */
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    /* Get Msvm_ComputerSystem_V1 */
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     if (hyperv1GetVSSDFromUUID(priv, uuid_string,
@@ -3388,7 +3671,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    /* Get Msvm_ProcessorSettingData */
+    /* Get Msvm_ProcessorSettingData_V1 */
     if (hyperv1GetProcSDByVSSDInstanceId(priv,
                 virtualSystemSettingData->data->InstanceID,
                 &processorSettingData) < 0) {
@@ -3399,7 +3682,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    /* Get Msvm_MemorySettingData */
+    /* Get Msvm_MemorySettingData_V1 */
     if (hyperv1GetMemSDByVSSDInstanceId(priv,
                 virtualSystemSettingData->data->InstanceID,
                 &memorySettingData) < 0) {
@@ -3410,7 +3693,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    /* Get Msvm_ResourceAllocationSettingData */
+    /* Get Msvm_ResourceAllocationSettingData_V1 */
     if (hyperv1GetRASDByVSSDInstanceId(priv,
                 virtualSystemSettingData->data->InstanceID,
                 &rasd) < 0) {
@@ -3420,7 +3703,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    /* Get Msvm_SyntheticEthernetPortSettingData */
+    /* Get Msvm_SyntheticEthernetPortSettingData_V1 */
     if (hyperv1GetSyntheticEthernetPortSDByVSSDInstanceId(priv,
                 virtualSystemSettingData->data->InstanceID,
                 &nets) < 0) {
@@ -3432,7 +3715,7 @@ hyperv1DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     /* Fill struct */
     def->virtType = VIR_DOMAIN_VIRT_HYPERV;
 
-    if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
+    if (hyperv1IsMsvmComputerSystemActive(computerSystem, NULL)) {
         def->id = computerSystem->data->ProcessID;
     } else {
         def->id = -1;
@@ -3514,8 +3797,8 @@ hyperv1ConnectListDefinedDomains(virConnectPtr conn, char **const names,
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystemList = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     int count = 0;
     size_t i;
 
@@ -3556,8 +3839,8 @@ hyperv1ConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     bool success = false;
     hypervPrivate *priv = conn->privateData;
-    Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystemList = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     int count = 0;
 
     if (hyperv1GetInactiveVirtualSystemList(priv, &computerSystemList) < 0)
@@ -3581,21 +3864,21 @@ hyperv1DomainCreateWithFlags(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
+    if (hyperv1IsMsvmComputerSystemActive(computerSystem, NULL)) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is already active or is in state transition"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_ENABLED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_ENABLED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -3618,7 +3901,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
     invokeXmlParam *params = NULL;
     properties_t *tab_props = NULL;
     embeddedParam embedded_param;
-    Msvm_ComputerSystem *host = NULL;
+    Msvm_ComputerSystem_V1 *host = NULL;
     int i = 0;
     int nb_params;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
@@ -3662,7 +3945,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
 
         /* Actually invoke the method to create the VM */
         if (hyperv1InvokeMethod(priv, params, nb_params, "DefineVirtualSystem",
-                    MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI,
+                    MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI,
                     selector, NULL) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                     _("Could not create new domain %s"), def->name);
@@ -3757,23 +4040,23 @@ hyperv1DomainUndefineFlags(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNU
     hypervPrivate *priv = domain->conn->privateData;
     invokeXmlParam *params = NULL;
     eprParam eprparam;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
 
     virCheckFlags(0, -1);
     virUUIDFormat(domain->uuid, uuid_string);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     /* try to shut down the VM if it's not disabled, just to be safe */
-    if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED) {
+    if (computerSystem->data->EnabledState != MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_DISABLED) {
         if (hyperv1DomainShutdown(domain) < 0)
             goto cleanup;
     }
 
     /* prepare params */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -3786,7 +4069,7 @@ hyperv1DomainUndefineFlags(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNU
 
     /* actually destroy the vm */
     if (hyperv1InvokeMethod(priv, params, 1, "DestroyVirtualSystem",
-                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL) < 0) {
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI, selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not delete domain"));
         goto cleanup;
@@ -3816,12 +4099,12 @@ hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
     char *xmlDomain = NULL;
     virDomainDefPtr def = NULL;
     virDomainDeviceDefPtr dev = NULL;
-    Msvm_ComputerSystem *host = NULL;
+    Msvm_ComputerSystem_V1 *host = NULL;
     char *hostname = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
-    Msvm_ResourceAllocationSettingData *controller = NULL;
-    Msvm_ResourceAllocationSettingData *rasd = NULL, *entry = NULL;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *controller = NULL;
+    Msvm_ResourceAllocationSettingData_V1 *rasd = NULL, *entry = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
     int num_scsi = 0;
 
     virUUIDFormat(domain->uuid, uuid_string);
@@ -3868,7 +4151,7 @@ hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
                 case VIR_DOMAIN_DISK_BUS_IDE:
                     while (entry != NULL) {
                         if (entry->data->ResourceType ==
-                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_IDE_CONTROLLER) {
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER) {
                             if ((entry->data->Address[0] - '0') ==
                                     dev->data.disk->info.addr.drive.controller) {
                                 controller = entry;
@@ -3883,7 +4166,7 @@ hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
                 case VIR_DOMAIN_DISK_BUS_SCSI:
                     while (entry != NULL) {
                         if (entry->data->ResourceType ==
-                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_PARALLEL_SCSI_HBA) {
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_PARALLEL_SCSI_HBA) {
                             if (num_scsi++ ==
                                     dev->data.disk->info.addr.drive.controller) {
                                 controller = entry;
@@ -3898,7 +4181,7 @@ hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
                 case VIR_DOMAIN_DISK_BUS_FDC:
                     while (entry != NULL) {
                         if (entry->data->ResourceType ==
-                                MSVM_RESOURCEALLOCATIONSETTINGDATA_RESOURCETYPE_FLOPPY) {
+                                MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_FLOPPY) {
                             controller = entry;
                             break;
                         }
@@ -3950,15 +4233,15 @@ hyperv1DomainGetAutostart(virDomainPtr domain, int *autostart)
     int result = -1;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_VirtualSystemGlobalSettingData *vsgsd = NULL;
+    Msvm_VirtualSystemGlobalSettingData_V1 *vsgsd = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
 
 
     virUUIDFormat(domain->uuid, uuid_string);
-    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where SystemName = \"%s\"", uuid_string);
 
-    if (hypervGetMsvmVirtualSystemGlobalSettingDataList(priv, &query,
+    if (hyperv1GetMsvmVirtualSystemGlobalSettingDataList(priv, &query,
                 &vsgsd) < 0)
         goto cleanup;
 
@@ -3977,7 +4260,7 @@ hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
     int result = -1;
     invokeXmlParam *params = NULL;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
     properties_t *tab_props = NULL;
     eprParam eprparam;
     embeddedParam embeddedparam;
@@ -3989,7 +4272,7 @@ hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
     virUUIDFormat(domain->uuid, uuid_string);
 
     /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION;
@@ -4020,7 +4303,7 @@ hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
     params[1].param = &embeddedparam;
 
     result = hyperv1InvokeMethod(priv, params, 2, "ModifyVirtualSystem",
-            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_RESOURCE_URI, selector, NULL);
+            MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V1_RESOURCE_URI, selector, NULL);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) vssd);
@@ -4060,9 +4343,9 @@ hyperv1DomainGetSchedulerParametersFlags(virDomainPtr domain,
         virTypedParameterPtr params, int *nparams, unsigned int flags)
 {
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_VirtualSystemSettingData *vssd = NULL;
-    Msvm_ProcessorSettingData *proc_sd = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_VirtualSystemSettingData_V1 *vssd = NULL;
+    Msvm_ProcessorSettingData_V1 *proc_sd = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     int saved_nparams = 0;
     int result = -1;
@@ -4074,7 +4357,7 @@ hyperv1DomainGetSchedulerParametersFlags(virDomainPtr domain,
     /* we don't return strings */
     flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     /* get info from host */
@@ -4153,12 +4436,12 @@ hyperv1DomainIsActive(virDomainPtr domain)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    result = hypervIsMsvmComputerSystemActive(computerSystem, NULL) ? 1 : 0;
+    result = hyperv1IsMsvmComputerSystemActive(computerSystem, NULL) ? 1 : 0;
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -4171,23 +4454,23 @@ hyperv1DomainManagedSave(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     bool in_transition = false;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (!hypervIsMsvmComputerSystemActive(computerSystem, &in_transition) ||
+    if (!hyperv1IsMsvmComputerSystemActive(computerSystem, &in_transition) ||
         in_transition) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not active or is in state transition"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_SUSPENDED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_SUSPENDED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -4200,15 +4483,15 @@ hyperv1DomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     result = computerSystem->data->EnabledState ==
-             MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED ? 1 : 0;
+             MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SUSPENDED ? 1 : 0;
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -4221,22 +4504,22 @@ hyperv1DomainManagedSaveRemove(virDomainPtr domain, unsigned int flags)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
 
     virCheckFlags(0, -1);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem->data->EnabledState !=
-        MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED) {
+        MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SUSPENDED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain has no managed save image"));
         goto cleanup;
     }
 
-    result = hypervInvokeMsvmComputerSystemRequestStateChange
-               (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_DISABLED);
+    result = hyperv1InvokeMsvmComputerSystemRequestStateChange
+               (domain, MSVM_COMPUTERSYSTEM_V1_REQUESTEDSTATE_DISABLED);
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -4250,8 +4533,8 @@ int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
 {
     int result = -1, i = 0, keycode = 0;
     hypervPrivate *priv = domain->conn->privateData;
-    Msvm_ComputerSystem *computerSystem = NULL;
-    Msvm_Keyboard *keyboards = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_Keyboard_V1 *keyboards = NULL;
     invokeXmlParam *params = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
@@ -4261,7 +4544,7 @@ int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
+    if (hyperv1MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
     virBufferAsprintf(&query,
@@ -4271,7 +4554,7 @@ int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
             "where ResultClass = Msvm_Keyboard",
             uuid_string);
 
-    if (hypervGetMsvmKeyboardList(priv, &query, &keyboards) < 0) {
+    if (hyperv1GetMsvmKeyboardList(priv, &query, &keyboards) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not get keyboards for domain"));
         goto cleanup;
@@ -4318,7 +4601,7 @@ int hyperv1DomainSendKey(virDomainPtr domain, unsigned int codeset,
         params[0].param = &simpleparam;
 
         if (hyperv1InvokeMethod(priv, params, 1, "TypeKey",
-                    MSVM_KEYBOARD_RESOURCE_URI, selector, NULL) < 0) {
+                    MSVM_KEYBOARD_V1_RESOURCE_URI, selector, NULL) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "Could not press key %d",
                     translatedKeycodes[i]);
             goto cleanup;
@@ -4343,8 +4626,8 @@ hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
 {
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computerSystemList = NULL;
-    Msvm_ComputerSystem *computerSystem = NULL;
+    Msvm_ComputerSystem_V1 *computerSystemList = NULL;
+    Msvm_ComputerSystem_V1 *computerSystem = NULL;
     size_t ndoms;
     virDomainPtr domain;
     virDomainPtr *doms = NULL;
@@ -4372,25 +4655,25 @@ hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
         goto cleanup;
     }
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
     virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
+    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_VIRTUAL);
 
     /* construct query with filter depending on flags */
     if (!(MATCH(VIR_CONNECT_LIST_DOMAINS_ACTIVE) &&
           MATCH(VIR_CONNECT_LIST_DOMAINS_INACTIVE))) {
         if (MATCH(VIR_CONNECT_LIST_DOMAINS_ACTIVE)) {
             virBufferAddLit(&query, "and ");
-            virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
+            virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_ACTIVE);
         }
 
         if (MATCH(VIR_CONNECT_LIST_DOMAINS_INACTIVE)) {
             virBufferAddLit(&query, "and ");
-            virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
+            virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_INACTIVE);
         }
     }
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
+    if (hyperv1GetMsvmComputerSystemList(priv, &query,
                                         &computerSystemList) < 0)
         goto cleanup;
 
@@ -4405,7 +4688,7 @@ hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
 
         /* filter by domain state */
         if (MATCH(VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE)) {
-            int st = hypervMsvmComputerSystemEnabledStateToDomainState(computerSystem);
+            int st = hyperv1MsvmComputerSystemEnabledStateToDomainState(computerSystem);
             if (!((MATCH(VIR_CONNECT_LIST_DOMAINS_RUNNING) &&
                    st == VIR_DOMAIN_RUNNING) ||
                   (MATCH(VIR_CONNECT_LIST_DOMAINS_PAUSED) &&
@@ -4422,7 +4705,7 @@ hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
         /* managed save filter */
         if (MATCH(VIR_CONNECT_LIST_DOMAINS_FILTERS_MANAGEDSAVE)) {
             bool mansave = computerSystem->data->EnabledState ==
-                           MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED;
+                           MSVM_COMPUTERSYSTEM_V1_ENABLEDSTATE_SUSPENDED;
 
             if (!((MATCH(VIR_CONNECT_LIST_DOMAINS_MANAGEDSAVE) && mansave) ||
                   (MATCH(VIR_CONNECT_LIST_DOMAINS_NO_MANAGEDSAVE) && !mansave)))
@@ -4439,7 +4722,7 @@ hyperv1ConnectListAllDomains(virConnectPtr conn, virDomainPtr **domains,
 
         domain = NULL;
 
-        if (hypervMsvmComputerSystemToDomain(conn, computerSystem,
+        if (hyperv1MsvmComputerSystemToDomain(conn, computerSystem,
                                              &domain) < 0)
             goto cleanup;
 

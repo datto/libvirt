@@ -736,332 +736,43 @@ hypervReturnCodeToString(int returnCode)
       case CIM_RETURNCODE_BUSY:
         return _("Busy");
 
-      case MSVM_RETURNCODE_FAILED:
+      case MSVM_RETURNCODE_V1_FAILED:
         return _("Failed");
 
-      case MSVM_RETURNCODE_ACCESS_DENIED:
+      case MSVM_RETURNCODE_V1_ACCESS_DENIED:
         return _("Access denied");
 
-      case MSVM_RETURNCODE_NOT_SUPPORTED:
+      case MSVM_RETURNCODE_V1_NOT_SUPPORTED:
         return _("Not supported");
 
-      case MSVM_RETURNCODE_STATUS_IS_UNKNOWN:
+      case MSVM_RETURNCODE_V1_STATUS_IS_UNKNOWN:
         return _("Status is unknown");
 
-      case MSVM_RETURNCODE_TIMEOUT:
+      case MSVM_RETURNCODE_V1_TIMEOUT:
         return _("Timeout");
 
-      case MSVM_RETURNCODE_INVALID_PARAMETER:
+      case MSVM_RETURNCODE_V1_INVALID_PARAMETER:
         return _("Invalid parameter");
 
-      case MSVM_RETURNCODE_SYSTEM_IS_IN_USE:
+      case MSVM_RETURNCODE_V1_SYSTEM_IS_IN_USE:
         return _("System is in use");
 
-      case MSVM_RETURNCODE_INVALID_STATE_FOR_THIS_OPERATION:
+      case MSVM_RETURNCODE_V1_INVALID_STATE_FOR_THIS_OPERATION:
         return _("Invalid state for this operation");
 
-      case MSVM_RETURNCODE_INCORRECT_DATA_TYPE:
+      case MSVM_RETURNCODE_V1_INCORRECT_DATA_TYPE:
         return _("Incorrect data type");
 
-      case MSVM_RETURNCODE_SYSTEM_IS_NOT_AVAILABLE:
+      case MSVM_RETURNCODE_V1_SYSTEM_IS_NOT_AVAILABLE:
         return _("System is not available");
 
-      case MSVM_RETURNCODE_OUT_OF_MEMORY:
+      case MSVM_RETURNCODE_V1_OUT_OF_MEMORY:
         return _("Out of memory");
 
       default:
         return _("Unknown return code");
     }
 }
-
-
-
-/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
- * Msvm_ComputerSystem
- */
-
-int
-hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
-                                                 int requestedState)
-{
-    int result = -1;
-    hypervPrivate *priv = domain->conn->privateData;
-    char uuid_string[VIR_UUID_STRING_BUFLEN];
-    WsXmlDocH response = NULL;
-    client_opt_t *options = NULL;
-    char *selector = NULL;
-    char *properties = NULL;
-    char *returnValue = NULL;
-    int returnCode;
-    char *instanceID = NULL;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ConcreteJob *concreteJob = NULL;
-    bool completed = false;
-
-    virUUIDFormat(domain->uuid, uuid_string);
-
-    if (virAsprintf(&selector, "Name=%s&CreationClassName=Msvm_ComputerSystem",
-                    uuid_string) < 0 ||
-        virAsprintf(&properties, "RequestedState=%d", requestedState) < 0)
-        goto cleanup;
-
-    options = wsmc_options_init();
-
-    if (options == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not initialize options"));
-        goto cleanup;
-    }
-
-    wsmc_add_selectors_from_str(options, selector);
-    wsmc_add_prop_from_str(options, properties);
-
-    /* Invoke method */
-    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_RESOURCE_URI,
-                                  options, "RequestStateChange", NULL);
-
-    if (hyperyVerifyResponse(priv->client, response, "invocation") < 0)
-        goto cleanup;
-
-    /* Check return value */
-    returnValue = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:ReturnValue");
-
-    if (returnValue == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not lookup %s for %s invocation"),
-                       "ReturnValue", "RequestStateChange");
-        goto cleanup;
-    }
-
-    if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not parse return code from '%s'"), returnValue);
-        goto cleanup;
-    }
-
-    if (returnCode == CIM_RETURNCODE_TRANSITION_STARTED) {
-        /* Get concrete job object */
-        instanceID = ws_xml_get_xpath_value(response, (char *)"/s:Envelope/s:Body/p:RequestStateChange_OUTPUT/p:Job/a:ReferenceParameters/w:SelectorSet/w:Selector[@Name='InstanceID']");
-
-        if (instanceID == NULL) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Could not lookup %s for %s invocation"),
-                           "InstanceID", "RequestStateChange");
-            goto cleanup;
-        }
-
-        /* FIXME: Poll every 100ms until the job completes or fails. There
-         *        seems to be no other way than polling. */
-        while (!completed) {
-            virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
-            virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
-
-            if (hypervGetMsvmConcreteJobList(priv, &query, &concreteJob) < 0)
-                goto cleanup;
-
-            if (concreteJob == NULL) {
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Could not lookup %s for %s invocation"),
-                               "Msvm_ConcreteJob", "RequestStateChange");
-                goto cleanup;
-            }
-
-            switch (concreteJob->data->JobState) {
-              case MSVM_CONCRETEJOB_JOBSTATE_NEW:
-              case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
-              case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
-              case MSVM_CONCRETEJOB_JOBSTATE_SHUTTING_DOWN:
-                hypervFreeObject(priv, (hypervObject *)concreteJob);
-                concreteJob = NULL;
-
-                usleep(100 * 1000);
-                continue;
-
-              case MSVM_CONCRETEJOB_JOBSTATE_COMPLETED:
-                completed = true;
-                break;
-
-              case MSVM_CONCRETEJOB_JOBSTATE_TERMINATED:
-              case MSVM_CONCRETEJOB_JOBSTATE_KILLED:
-              case MSVM_CONCRETEJOB_JOBSTATE_EXCEPTION:
-              case MSVM_CONCRETEJOB_JOBSTATE_SERVICE:
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Concrete job for %s invocation is in error state"),
-                               "RequestStateChange");
-                goto cleanup;
-
-              default:
-                virReportError(VIR_ERR_INTERNAL_ERROR,
-                               _("Concrete job for %s invocation is in unknown state"),
-                               "RequestStateChange");
-                goto cleanup;
-            }
-        }
-    } else if (returnCode != CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Invocation of %s returned an error: %s (%d)"),
-                       "RequestStateChange", hypervReturnCodeToString(returnCode),
-                       returnCode);
-        goto cleanup;
-    }
-
-    result = 0;
-
- cleanup:
-    if (options != NULL)
-        wsmc_options_destroy(options);
-
-    ws_xml_destroy_doc(response);
-    VIR_FREE(selector);
-    VIR_FREE(properties);
-    VIR_FREE(returnValue);
-    VIR_FREE(instanceID);
-    hypervFreeObject(priv, (hypervObject *)concreteJob);
-
-    return result;
-}
-
-int
-hypervMsvmComputerSystemEnabledStateToDomainState
-  (Msvm_ComputerSystem *computerSystem)
-{
-    switch (computerSystem->data->EnabledState) {
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
-        return VIR_DOMAIN_NOSTATE;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED:
-        return VIR_DOMAIN_RUNNING;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED:
-        return VIR_DOMAIN_SHUTOFF;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED:
-        return VIR_DOMAIN_PAUSED;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED: /* managed save */
-        return VIR_DOMAIN_SHUTOFF;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STARTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SNAPSHOTTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SAVING:
-        return VIR_DOMAIN_RUNNING;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING:
-        return VIR_DOMAIN_SHUTDOWN;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING:
-        return VIR_DOMAIN_RUNNING;
-
-      default:
-        return VIR_DOMAIN_NOSTATE;
-    }
-}
-
-bool
-hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
-                                 bool *in_transition)
-{
-    if (in_transition != NULL)
-        *in_transition = false;
-
-    switch (computerSystem->data->EnabledState) {
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
-        return false;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED:
-        return true;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_DISABLED:
-        return false;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED:
-        return true;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED: /* managed save */
-        return false;
-
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STARTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SNAPSHOTTING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SAVING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_STOPPING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSING:
-      case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_RESUMING:
-        if (in_transition != NULL)
-            *in_transition = true;
-
-        return true;
-
-      default:
-        return false;
-    }
-}
-
-int
-hypervMsvmComputerSystemToDomain(virConnectPtr conn,
-                                 Msvm_ComputerSystem *computerSystem,
-                                 virDomainPtr *domain)
-{
-    unsigned char uuid[VIR_UUID_BUFLEN];
-
-    if (domain == NULL || *domain != NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
-        return -1;
-    }
-
-    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Could not parse UUID from string '%s'"),
-                       computerSystem->data->Name);
-        return -1;
-    }
-
-    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid);
-
-    if (*domain == NULL)
-        return -1;
-
-    if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
-        (*domain)->id = computerSystem->data->ProcessID;
-    } else {
-        (*domain)->id = -1;
-    }
-
-    return 0;
-}
-
-int
-hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
-                                   Msvm_ComputerSystem **computerSystem)
-{
-    hypervPrivate *priv = domain->conn->privateData;
-    char uuid_string[VIR_UUID_STRING_BUFLEN];
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-
-    if (computerSystem == NULL || *computerSystem != NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
-        return -1;
-    }
-
-    virUUIDFormat(domain->uuid, uuid_string);
-
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
-    virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystem) < 0)
-        return -1;
-
-    if (*computerSystem == NULL) {
-        virReportError(VIR_ERR_NO_DOMAIN,
-                       _("No domain with UUID %s"), uuid_string);
-        return -1;
-    }
-
-    return 0;
-}
-
 
 
 #include "hyperv_wmi.generated.c"
