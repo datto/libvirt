@@ -275,24 +275,25 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    /* Check if the connection can be established and if the server has the
-     * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
-     * succeeds than the connection has been established. If the returned list
-     * is empty than the server isn't a Hyper-V server. */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
-
-    if (hyperv1GetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("%s is not a Hyper-V server"), conn->uri->server);
-        goto cleanup;
-    }
-
     if (STRPREFIX(winVersion, HYPERV_VERSION_2008)) {
+        /* Check if the connection can be established and if the server has the
+         * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
+         * succeeds than the connection has been established. If the returned list
+         * is empty than the server isn't a Hyper-V server. */
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
+        virBufferAddLit(&query, "where ");
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
+
+        if (hyperv1GetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+            goto cleanup;
+
+        if (computerSystem == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s is not a Hyper-V server"), conn->uri->server);
+            goto cleanup;
+        }
+
+        /* if that check succeeds, set up the driver */
         hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
     } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012) ||
                STRPREFIX(winVersion, HYPERV_VERSION_2016)) {
