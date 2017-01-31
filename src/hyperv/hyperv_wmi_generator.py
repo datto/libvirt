@@ -288,6 +288,19 @@ def generate_cimtypes_header_header():
     return '#include "hyperv_wmi.h"\n'
 
 
+def mount_common_functions(common_api, api, api_ver):
+    orig = open(api, "rb").readlines()
+    common = open(common_api, "rb").readlines()
+
+    common_replaced = [line.replace("_GENERIC_", str(api_ver)) for line in common]
+
+    for i, line in enumerate(orig):
+        if line == "##HYPERV_COMMON_MOUNTPOINT##\n":
+            del orig[i]
+            orig[i:i] = common_replaced
+
+    open_and_print(api).writelines(orig)
+
 
 def main():
     if "srcdir" in os.environ:
@@ -363,6 +376,12 @@ def main():
     for name in names:
         cimtypes_header.write(classes_by_name[name].generate_cimtypes_cimclasses())
     cimtypes_header.write('    { "", NULL },\n};\n')
+
+    # mount common functions
+    mount_common_functions(os.path.join(output_dirname, "hyperv_api_common.h"),
+            os.path.join(output_dirname, "hyperv_api_v1.h"), 1)
+    mount_common_functions(os.path.join(output_dirname, "hyperv_api_common.c"),
+            os.path.join(output_dirname, "hyperv_api_v1.c"), 1)
 
 if __name__ == "__main__":
     main()
