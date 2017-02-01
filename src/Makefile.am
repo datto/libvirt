@@ -632,7 +632,7 @@ EXTRA_DIST += check-drivername.pl
 
 DRIVER_SOURCE_FILES = \
 	$(ESX_DRIVER_SOURCES) \
-	$(HYPERV_DRIVER_SORUCES) \
+	$(HYPERV_DRIVER_SOURCES) \
 	$(INTERFACE_DRIVER_SOURCES) \
 	$(LIBXL_DRIVER_SOURCES) \
 	$(LXC_DRIVER_SOURCES) \
@@ -905,6 +905,7 @@ HYPERV_DRIVER_SOURCES =									\
 		hyperv/hyperv_wmi_classes.c hyperv/hyperv_wmi_classes.h			\
 		hyperv/hyperv_private.c hyperv/hyperv_private.h					\
 		hyperv/hyperv_api_v1.c hyperv/hyperv_api_v1.h					\
+		hyperv/hyperv_api_v2.c hyperv/hyperv_api_v2.h					\
 		hyperv/hyperv_network_api_v1.c hyperv/hyperv_network_api_v1.h	\
 		hyperv/openwsman.h
 

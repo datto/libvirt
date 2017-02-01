@@ -74,7 +74,10 @@ class Class:
         if self.name.startswith("Win32_") or self.name.startswith("CIM_"):
             header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/%s\"\n" % self.name
         else:
-            header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/%s\"\n" % self.name
+            if self.version == "1":
+                header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/%s\"\n" % self.name
+            else:
+                header += "    \"http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v%s/%s\"\n" % (self.version, self.name)
 
         header += "\n"
         header += "#define %s_CLASSNAME \\\n" % name_upper
@@ -178,9 +181,13 @@ class Property:
                "string"   : "STR",
                "datetime" : "STR",
                "int8"     : "INT8",
+               "sint8"    : "INT8",
                "int16"    : "INT16",
+               "sint16"   : "INT16",
                "int32"    : "INT32",
+               "sint32"   : "INT32",
                "int64"    : "INT64",
+               "sint64"   : "INT64",
                "uint8"    : "UINT8",
                "uint16"   : "UINT16",
                "uint32"   : "UINT32",
@@ -257,6 +264,7 @@ def parse_class(block):
 
     if name.endswith("_v2"):
         version = "2"
+        name = name[:-3]
     else:
         version = "1"
 
@@ -330,7 +338,7 @@ def main():
             if line == "end":
                 if block[0][1].startswith("class"):
                     cls = parse_class(block)
-                    classes_by_name[cls.name] = cls
+                    classes_by_name[cls.full_name] = cls
 
                 block = None
             else:

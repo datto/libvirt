@@ -39,6 +39,7 @@
 
 #include "hyperv_api_v1.h"
 #include "hyperv_network_api_v1.h"
+#include "hyperv_api_v2.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -128,6 +129,86 @@ cleanup:
     return result;
 }
 
+static int
+hypervSetupV2(virHypervisorDriverPtr d, virNetworkDriverPtr n,
+        hypervPrivate *priv)
+{
+    int result = -1;
+
+    /* Set up driver functions based on what API version the server uses. */
+    d->connectGetType = hyperv2ConnectGetType; /* TODO: Get current version */
+    d->connectGetVersion = hyperv2ConnectGetVersion; /* TODO: get current version */
+    d->connectGetHostname = hyperv2ConnectGetHostname; /* TODO: Get current version */
+    d->connectGetMaxVcpus = hyperv2ConnectGetMaxVcpus; /* TODO: get current version */
+    d->nodeGetInfo = hyperv2NodeGetInfo; /* TODO: Get current version */
+    d->connectListDomains = hyperv2ConnectListDomains; /* TODO: Get current version */
+    d->connectNumOfDomains = hyperv2ConnectNumOfDomains; /* TODO: Get current version */
+    d->domainCreateXML = hyperv2DomainCreateXML; /* TODO: get current version */
+    d->domainDefineXML = hyperv2DomainDefineXML; /* TODO: get current version */
+    d->domainUndefine = hyperv2DomainUndefine; /* TODO: get current version */
+    d->domainUndefineFlags = hyperv2DomainUndefineFlags; /* TODO: get current version */
+    d->domainAttachDevice = hyperv2DomainAttachDevice; /* TODO: get current verison */
+    d->domainAttachDeviceFlags = hyperv2DomainAttachDeviceFlags; /* TODO: get current version */
+    d->connectListAllDomains = hyperv2ConnectListAllDomains; /* 0.10.2 */
+    d->domainLookupByID = hyperv2DomainLookupByID; /* TODO: Get current version */
+    d->domainLookupByUUID = hyperv2DomainLookupByUUID; /* TODO: Get current version */
+    d->domainLookupByName = hyperv2DomainLookupByName; /* TODO: Get current version */
+    d->domainSuspend = hyperv2DomainSuspend; /* TODO: Get current version */
+    d->domainResume = hyperv2DomainResume; /* TODO: Get current version */
+    d->domainShutdown = hyperv2DomainShutdown; /* TODO: get current version */
+    d->domainShutdownFlags = hyperv2DomainShutdownFlags; /* TODO: get current version */
+    d->domainReboot = hyperv2DomainReboot; /* TODO: get current version */
+    d->domainDestroy = hyperv2DomainDestroy; /* TODO: Get current version */
+    d->domainDestroyFlags = hyperv2DomainDestroyFlags; /* TODO: Get current version */
+    d->domainGetOSType = hyperv2DomainGetOSType; /* TODO: Get current version */
+    d->domainGetMaxMemory = hyperv2DomainGetMaxMemory; /* TODO: get current version */
+    d->domainSetMaxMemory = hyperv2DomainSetMaxMemory; /* TODO: get current version */
+    d->domainSetMemory = hyperv2DomainSetMemory; /* TODO: get current version */
+    d->domainSetMemoryFlags = hyperv2DomainSetMemoryFlags; /* TODO: get current version */
+    d->domainGetInfo = hyperv2DomainGetInfo; /* TODO: Get current version */
+    d->domainGetState = hyperv2DomainGetState; /* TODO: Get current version */
+    d->domainScreenshot = hyperv2DomainScreenshot; /* TODO: get current version */
+    d->domainSetVcpus = hyperv2DomainSetVcpus; /* TODO: get current version */
+    d->domainSetVcpusFlags = hyperv2DomainSetVcpusFlags; /* TODO: get current version */
+    d->domainGetVcpusFlags = hyperv2DomainGetVcpusFlags; /* TODO: get current version */
+    d->domainGetVcpus = hyperv2DomainGetVcpus; /* TODO: Get current version */
+    d->domainGetMaxVcpus = hyperv2DomainGetMaxVcpus; /* TODO: get current version */
+    d->domainGetXMLDesc = hyperv2DomainGetXMLDesc; /* TODO: Get current version */
+    d->connectListDefinedDomains = hyperv2ConnectListDefinedDomains; /* TODO: Get current version */
+    d->connectNumOfDefinedDomains = hyperv2ConnectNumOfDefinedDomains; /* TODO: Get current version */
+    d->domainCreate = hyperv2DomainCreate; /* TODO: Get current version */
+    d->domainCreateWithFlags = hyperv2DomainCreateWithFlags; /* TODO: Get current version */
+    d->domainGetAutostart = hyperv2DomainGetAutostart; /* TODO: get current version */
+    d->domainSetAutostart = hyperv2DomainSetAutostart; /* TODO: get current version */
+    d->domainGetSchedulerType = hyperv2DomainGetSchedulerType; /* TODO: get current version */
+    d->domainGetSchedulerParameters = hyperv2DomainGetSchedulerParameters; /* TODO: get current version */
+    d->domainGetSchedulerParametersFlags = hyperv2DomainGetSchedulerParametersFlags; /* TODO: get current version */
+    d->nodeGetFreeMemory = hyperv2NodeGetFreeMemory; /* TODO: get current version */
+    d->domainIsActive = hyperv2DomainIsActive;
+    d->domainManagedSave = hyperv2DomainManagedSave; /* TODO: Get current version */
+    d->domainHasManagedSaveImage = hyperv2DomainHasManagedSaveImage; /* TODO: Get current version */
+    d->domainManagedSaveRemove = hyperv2DomainManagedSaveRemove; /* TODO: Get current version */
+    d->domainSendKey = hyperv2DomainSendKey; /* TODO: get current version */
+
+    /* Set up network driver functions */
+    //n->connectListNetworks = hyperv2ConnectListNetworks; /* TODO: get current version */
+    //n->connectNumOfNetworks = hyperv2ConnectNumOfNetworks; /* TODO: get current version */
+    //n->connectListDefinedNetworks = hyperv2ConnectListDefinedNetworks; /* TODO: get current version */
+    //n->networkLookupByName = hyperv2NetworkLookupByName; /* TODO: get current version */
+    //n->connectNumOfDefinedNetworks = hyperv2ConnectNumOfDefinedNetworks; /* TODO: get current version */
+
+    /* set up capabilities */
+    priv->caps = hyperv2CapsInit(priv);
+    if (priv->caps == NULL) {
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    return result;
+}
+
 static char *
 hypervNodeGetWindowsVersion(hypervPrivate *priv)
 {
@@ -165,6 +246,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     char *password = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem_V1 *computerSystem = NULL;
+    Msvm_ComputerSystem_V2 *computerSystem_v2 = NULL;
     char *winVersion = NULL;
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
@@ -275,28 +357,45 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    /* Check if the connection can be established and if the server has the
-     * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
-     * succeeds than the connection has been established. If the returned list
-     * is empty than the server isn't a Hyper-V server. */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
-
-    if (hyperv1GetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("%s is not a Hyper-V server"), conn->uri->server);
-        goto cleanup;
-    }
-
     if (STRPREFIX(winVersion, HYPERV_VERSION_2008)) {
+        /* Check if the connection can be established and if the server has the
+         * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
+         * succeeds than the connection has been established. If the returned list
+         * is empty than the server isn't a Hyper-V server. */
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_SELECT);
+        virBufferAddLit(&query, "where ");
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V1_WQL_PHYSICAL);
+
+        if (hyperv1GetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+            goto cleanup;
+
+        if (computerSystem == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s is not a Hyper-V server"), conn->uri->server);
+            goto cleanup;
+        }
+
         hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
     } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012) ||
                STRPREFIX(winVersion, HYPERV_VERSION_2016)) {
-        // hypervSetupV2(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
+        /* Check if the connection can be established and if the server has the
+         * Hyper-V role installed. If the call to hyperv2GetMsvmComputerSystemList
+         * succeeds than the connection has been established. If the returned list
+         * is empty than the server isn't a Hyper-V server. */
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
+        virBufferAddLit(&query, "where ");
+        virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_PHYSICAL);
+
+        if (hyperv2GetMsvmComputerSystemList(priv, &query, &computerSystem_v2) < 0)
+            goto cleanup;
+
+        if (computerSystem_v2 == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s is not a Hyper-V server"), conn->uri->server);
+            goto cleanup;
+        }
+
+        hypervSetupV2(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
     } else {
         // whatever this is, it's not supported
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Unsupported Windows version"));
@@ -312,6 +411,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     VIR_FREE(username);
     VIR_FREE(password);
     hypervFreeObject(priv, (hypervObject *)computerSystem);
+    hypervFreeObject(priv, (hypervObject *)computerSystem_v2);
 
     return result;
 }
