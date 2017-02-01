@@ -81,6 +81,9 @@ class Class:
 
         header += "\n"
         header += "#define %s_CLASSNAME \\\n" % name_upper
+        header += "    \"%s\"\n" % self.full_name
+        header += "\n"
+        header += "#define %s_INTERNAL \\\n" % name_upper
         header += "    \"%s\"\n" % self.name
         header += "\n"
         header += "#define %s_WQL_SELECT \\\n" % name_upper
@@ -126,7 +129,7 @@ class Class:
 
         source += "                             %s_Data_TypeInfo,\n" % self.full_name
         source += "                             %s_RESOURCE_URI,\n" % name_upper
-        source += "                             %s_CLASSNAME,\n" % name_upper
+        source += "                             %s_INTERNAL,\n" % name_upper
         source += "                             (hypervObject **)list);\n"
         source += "}\n"
         source += "\n"

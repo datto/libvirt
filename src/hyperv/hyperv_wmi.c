@@ -373,6 +373,7 @@ hypervAddEmbeddedParam(properties_t *prop_t, int nbProps, const char *paramName,
     xmlBufferPtr xmlBufferNode = NULL;
     const xmlChar *xmlCharCdataContent = NULL;
     xmlNodePtr xmlNodeCdata = NULL;
+    char *internalClassName = NULL;
     const char *type = NULL;
     bool isArray = false;
     int len = 0, i = 0;
@@ -399,9 +400,16 @@ hypervAddEmbeddedParam(properties_t *prop_t, int nbProps, const char *paramName,
         goto cleanup;
     }
 
+    /* get internal name from namespaced instanceName */
+    if (VIR_STRNDUP(internalClassName, instanceName, strlen(instanceName) - 3) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not extract class name"));
+        goto cleanup;
+    }
+
     /* add CLASSNAME node to INSTANCE node */
     if (ws_xml_add_node_attr(xmlNodeInstance, NULL, "CLASSNAME",
-                instanceName) == NULL) {
+                internalClassName) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not add attribute to node"));
         goto cleanup;
@@ -489,6 +497,7 @@ hypervAddEmbeddedParam(properties_t *prop_t, int nbProps, const char *paramName,
     result = 0;
 
 cleanup:
+    VIR_FREE(internalClassName);
     ws_xml_destroy_doc(xmlDocCdata);
     ws_xml_destroy_doc(xmlDocTemp);
     if (!xmlBufferNode) {
