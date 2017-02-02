@@ -2904,7 +2904,7 @@ hyperv2DomainShutdownFlags(virDomainPtr domain, unsigned int flags)
     }
 
     result = hyperv2InvokeMsvmComputerSystemRequestStateChange(domain,
-            MSVM_COMPUTERSYSTEM_V2_REQUESTEDSTATE_ENABLED);
+            MSVM_COMPUTERSYSTEM_V2_REQUESTEDSTATE_DISABLED);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) computerSystem);
