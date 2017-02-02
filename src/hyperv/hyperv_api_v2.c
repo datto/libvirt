@@ -3014,11 +3014,9 @@ hyperv2DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     invokeXmlParam *params = NULL;
     hypervPrivate *priv = domain->conn->privateData;
     properties_t *tab_props = NULL;
-    eprParam eprparam;
     embeddedParam embeddedparam;
     Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     Msvm_MemorySettingData_V2 *mem_sd = NULL;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     char *memory_str = NULL;
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
@@ -3032,12 +3030,6 @@ hyperv2DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
         goto cleanup;
 
     virUUIDFormat(domain->uuid, uuid_string);
-
-    /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
-    eprparam.query = &query;
-    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* get all the data we need */
     if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
@@ -3059,16 +3051,13 @@ hyperv2DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
-    if (VIR_ALLOC_N(params, 2) < 0)
+    if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
-    params[0].type = EPR_PARAM;
-    params[0].param = &eprparam;
-    params[1].name = "ResourceSettingData";
-    params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam;
+    params[0].name = "ResourceSettings";
+    params[0].type = EMBEDDED_PARAM;
+    params[0].param = &embeddedparam;
 
-    result = hyperv2InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+    result = hyperv2InvokeMethod(priv, params, 1, "ModifyResourceSettings",
         MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI, selector, NULL);
 
 cleanup:
@@ -3077,7 +3066,6 @@ cleanup:
     VIR_FREE(memory_str);
     hypervFreeObject(priv, (hypervObject *) vssd);
     hypervFreeObject(priv, (hypervObject *) mem_sd);
-    virBufferFreeAndReset(&query);
     return result;
 }
 
@@ -3098,9 +3086,7 @@ hyperv2DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     hypervPrivate *priv = domain->conn->privateData;
     invokeXmlParam *params = NULL;
     properties_t *tab_props = NULL;
-    eprParam eprparam;
     embeddedParam embeddedparam;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     Msvm_MemorySettingData_V2 *mem_sd = NULL;
     char *memory_str = NULL;
@@ -3113,12 +3099,6 @@ hyperv2DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
         goto cleanup;
 
     virUUIDFormat(domain->uuid, uuid_string);
-
-    /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"",uuid_string);
-    eprparam.query = &query;
-    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* get all the data we need */
     if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
@@ -3140,16 +3120,13 @@ hyperv2DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
-    if (VIR_ALLOC_N(params, 2) < 0)
+    if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
-    params[0].type = EPR_PARAM;
-    params[0].param = &eprparam;
-    params[1].name = "ResourceSettingData";
-    params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam;
+    params[0].name = "ResourceSettings";
+    params[0].type = EMBEDDED_PARAM;
+    params[0].param = &embeddedparam;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 1, "ModifyResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not set domain memory"));
@@ -3164,7 +3141,6 @@ hyperv2DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     VIR_FREE(memory_str);
     hypervFreeObject(priv, (hypervObject *) vssd);
     hypervFreeObject(priv, (hypervObject *) mem_sd);
-    virBufferFreeAndReset(&query);
     return result;
 }
 
@@ -3454,11 +3430,9 @@ hyperv2DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     Msvm_ProcessorSettingData_V2 *proc_sd = NULL;
     hypervPrivate *priv = domain->conn->privateData;
-    eprParam eprparam;
     embeddedParam embeddedparam;
     properties_t *tab_props;
     invokeXmlParam *params = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
     char *nvcpus_str = NULL;
 
     /* Convert nvcpus into a string value */
@@ -3477,12 +3451,6 @@ hyperv2DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
         goto cleanup;
     }
 
-    /* prepare parameters */
-    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&buf, "where Name = \"%s\"", uuid_string);
-    eprparam.query = &buf;
-    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
-
     embeddedparam.nbProps = 2;
     if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
         goto cleanup;
@@ -3494,16 +3462,13 @@ hyperv2DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     embeddedparam.prop_t = tab_props;
 
     /* prepare and invoke method */
-    if (VIR_ALLOC_N(params, 2) < 0)
+    if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
-    params[0].type = EPR_PARAM;
-    params[0].param = &eprparam;
-    params[1].name = "ResourceSettingData";
-    params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam;
+    params[0].name = "ResourceSettings";
+    params[0].type = EMBEDDED_PARAM;
+    params[0].param = &embeddedparam;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 1, "ModifyResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI, selector, NULL) < 0)
         goto cleanup;
 
@@ -3515,7 +3480,6 @@ cleanup:
     VIR_FREE(nvcpus_str);
     hypervFreeObject(priv, (hypervObject *) vssd);
     hypervFreeObject(priv, (hypervObject *) proc_sd);
-    virBufferFreeAndReset(&buf);
     return result;
 }
 
