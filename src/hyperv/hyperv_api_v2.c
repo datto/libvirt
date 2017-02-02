@@ -3902,19 +3902,19 @@ hyperv2DomainDefineXML(virConnectPtr conn, const char *xml)
 
         tab_props[0].name = "ElementName";
         tab_props[0].val = def->name;
-        embedded_param.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+        embedded_param.instanceName = "Msvm_VirtualSystemSettingData";
         embedded_param.prop_t = tab_props;
 
         /* Create XML params for method invocation */
         nb_params = 1;
         if (VIR_ALLOC_N(params, nb_params) < 0)
             goto cleanup;
-        params[0].name = "SystemSettingData";
+        params[0].name = "SystemSettings";
         params[0].type = EMBEDDED_PARAM;
         params[0].param = &embedded_param;
 
         /* Actually invoke the method to create the VM */
-        if (hyperv2InvokeMethod(priv, params, nb_params, "DefineVirtualSystem",
+        if (hyperv2InvokeMethod(priv, params, nb_params, "DefineSystem",
                     MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                     selector, NULL) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -4033,12 +4033,12 @@ hyperv2DomainUndefineFlags(virDomainPtr domain, unsigned int flags ATTRIBUTE_UNU
 
     if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
+    params[0].name = "AffectedSystem";
     params[0].type = EPR_PARAM;
     params[0].param = &eprparam;
 
     /* actually destroy the vm */
-    if (hyperv2InvokeMethod(priv, params, 1, "DestroyVirtualSystem",
+    if (hyperv2InvokeMethod(priv, params, 1, "DestroySystem",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI, selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not delete domain"));
