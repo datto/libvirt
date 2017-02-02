@@ -4246,7 +4246,7 @@ hyperv2DomainGetAutostart(virDomainPtr domain, int *autostart)
     if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
         goto cleanup;
 
-    *autostart = vssd->data->AutomaticStartupAction;
+    *autostart = (vssd->data->AutomaticStartupAction > 2);
     result = 0;
 
  cleanup:
