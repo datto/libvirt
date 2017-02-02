@@ -3055,7 +3055,7 @@ hyperv2DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     tab_props[0].val = memory_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = mem_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.instanceName = MSVM_MEMORYSETTINGDATA_V2_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
@@ -3136,7 +3136,7 @@ hyperv2DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     tab_props[0].val = memory_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = mem_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.instanceName = MSVM_MEMORYSETTINGDATA_V2_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
@@ -3490,7 +3490,7 @@ hyperv2DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     tab_props[0].val = nvcpus_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = proc_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_ProcessorSettingData";
+    embeddedparam.instanceName = MSVM_PROCESSORSETTINGDATA_V2_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* prepare and invoke method */

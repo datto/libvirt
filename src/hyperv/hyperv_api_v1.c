@@ -3054,7 +3054,7 @@ hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory)
     tab_props[0].val = memory_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = mem_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.instanceName = MSVM_MEMORYSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
@@ -3135,7 +3135,7 @@ hyperv1DomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
     tab_props[0].val = memory_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = mem_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_MemorySettingData";
+    embeddedparam.instanceName = MSVM_MEMORYSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up invokeXmlParam */
@@ -3489,7 +3489,7 @@ hyperv1DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
     tab_props[0].val = nvcpus_str;
     tab_props[1].name = "InstanceID";
     tab_props[1].val = proc_sd->data->InstanceID;
-    embeddedparam.instanceName = "Msvm_ProcessorSettingData";
+    embeddedparam.instanceName = MSVM_PROCESSORSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* prepare and invoke method */
@@ -3932,7 +3932,7 @@ hyperv1DomainDefineXML(virConnectPtr conn, const char *xml)
 
         tab_props[0].name = "ElementName";
         tab_props[0].val = def->name;
-        embedded_param.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+        embedded_param.instanceName = MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_V1_CLASSNAME;
         embedded_param.prop_t = tab_props;
 
         /* Create XML params for method invocation */
@@ -4289,7 +4289,7 @@ hyperv1DomainSetAutostart(virDomainPtr domain, int autostart)
     tab_props[1].name = "InstanceID";
     tab_props[1].val = vssd->data->InstanceID;
 
-    embeddedparam.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+    embeddedparam.instanceName = MSVM_VIRTUALSYSTEMGLOBALSETTINGDATA_V1_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up and invoke method */
