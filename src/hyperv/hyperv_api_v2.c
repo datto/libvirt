@@ -598,8 +598,8 @@ cleanup:
 }
 
 static int
-hyperv2GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
-        const char *id, Msvm_SyntheticEthernetPortSettingData_V2 **out)
+hyperv2GetEthernetPortAllocationSDByVSSDInstanceId(hypervPrivate *priv,
+        const char *id, Msvm_EthernetPortAllocationSettingData_V2 **out)
 {
     int result = -1;
     virBuffer query = VIR_BUFFER_INITIALIZER;
@@ -608,10 +608,10 @@ hyperv2GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
             "associators of "
             "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
             "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
-            "ResultClass = Msvm_SyntheticEthernetPortSettingData",
+            "ResultClass = Msvm_EthernetPortAllocationSettingData",
             id);
 
-    if (hyperv2GetMsvmSyntheticEthernetPortSettingDataList(priv, &query,
+    if (hyperv2GetMsvmEthernetPortAllocationSettingDataList(priv, &query,
                 out) < 0)
         goto cleanup;
 
@@ -1426,74 +1426,80 @@ cleanup:
 }
 
 static int
-hyperv2DomainDefParseSyntheticEthernetAdapter(virDomainDefPtr def,
-        Msvm_SyntheticEthernetPortSettingData_V2 *net,
+hyperv2DomainDefParseEthernetAdapter(virDomainDefPtr def,
+        Msvm_EthernetPortAllocationSettingData_V2 *net,
         hypervPrivate *priv)
 {
     int result = -1;
     virDomainNetDefPtr ndef = NULL;
-    Msvm_EthernetSwitchPort_V2 *switchPort = NULL;
+    Msvm_SyntheticEthernetPortSettingData_V2 *sepsd = NULL;
     Msvm_VirtualEthernetSwitch_V2 *vSwitch = NULL;
-    char **switchPortConnection = NULL;
-    char *switchPortConnectionEscaped = NULL;
+    char **switchConnection = NULL;
+    char *switchConnectionEscaped = NULL;
+    char *sepsdPATH = NULL;
+    char *sepsdEscaped = NULL;
     char *temp = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
 
     VIR_DEBUG("Parsing ethernet adapter '%s'", net->data->InstanceID);
 
-    if (net->data->Connection.count < 1)
-        goto success;
-
     if (VIR_ALLOC(ndef) < 0)
         goto cleanup;
 
     ndef->type = VIR_DOMAIN_NET_TYPE_BRIDGE;
-    /* set mac address */
-    if (virMacAddrParseHex(net->data->Address, &ndef->mac) < 0)
-        goto cleanup;
 
-    /* If there's no switch port connection, then the adapter isn't hooked
-     * up to anything and we don't have to do anything more. */
-    switchPortConnection = net->data->Connection.data;
-    if (*switchPortConnection == NULL) {
+    /*
+     * If there's no switch port connection or the EnabledState is disabled,
+     * then the adapter isn't hooked up to anything and we don't have to
+     * do anything more.
+     */
+    switchConnection = net->data->HostResource.data;
+    if (net->data->HostResource.count < 1 || *switchConnection == NULL ||
+            net->data->EnabledState == MSVM_ETHERNETPORTALLOCATIONSETTINGDATA_V2_ENABLEDSTATE_DISABLED) {
         VIR_DEBUG("Adapter not connected to switch");
         goto success;
     }
 
-    /* Now we retrieve the associated Msvm_SwitchPort_V2 and Msvm_VirtualSwitch_V2
-     * objects, and use all three to build the XML definition. */
-    switchPortConnectionEscaped = virStringReplace(*switchPortConnection,
+    /*
+     * Now we retrieve the associated Msvm_SyntheticEthernetPortSettingData_V2
+     * and Msvm_VirtualSwitch_V2 objects, and use all three to build the XML
+     * definition.
+     */
+
+    /* begin by getting the Msvm_SyntheticEthernetPortSettingData_V2 object */
+    sepsdPATH = net->data->Parent;
+    sepsdEscaped = virStringReplace(sepsdPATH, "\\", "\\\\");
+    sepsdEscaped = virStringReplace(sepsdEscaped, "\"", "\\\"");
+    virBufferAsprintf(&query,
+            "select * from Msvm_SyntheticEthernetPortSettingData "
+            "where __PATH=\"%s\"",
+            sepsdEscaped);
+
+    if ((hyperv2GetMsvmSyntheticEthernetPortSettingDataList(priv, &query,
+                &sepsd) < 0) || sepsd == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve settings"));
+        goto cleanup;
+    }
+
+    /* set mac address */
+    if (virMacAddrParseHex(sepsd->data->Address, &ndef->mac) < 0)
+        goto cleanup;
+
+    /* now we get the Msvm_VirtualEthernetSwitch_V2 */
+    virBufferFreeAndReset(&query);
+    switchConnectionEscaped = virStringReplace(*switchConnection,
             "\\", "\\\\");
-    switchPortConnectionEscaped = virStringReplace(switchPortConnectionEscaped,
+    switchConnectionEscaped = virStringReplace(switchConnectionEscaped,
             "\"", "\\\"");
 
     virBufferAsprintf(&query,
-                      "select * from Msvm_SwitchPort where __PATH=\"%s\"",
-                      switchPortConnectionEscaped);
+                      "select * from Msvm_VirtualEthernetSwitch "
+                      "where __PATH=\"%s\"",
+                      switchConnectionEscaped);
 
-    if (hyperv2GetMsvmEthernetSwitchPortList(priv, &query, &switchPort) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                _("Could not retrieve switch port"));
-        goto cleanup;
-    }
-    if (switchPort == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                _("Could not retrieve switch port"));
-        goto cleanup;
-    }
-
-    /* Now we use the switch port to jump to the switch */
-    virBufferFreeAndReset(&query);
-    virBufferAsprintf(&query,
-            "select * from Msvm_VirtualSwitch where Name=\"%s\"",
-            switchPort->data->SystemName);
-
-    if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                _("Could not retrieve virtual switch"));
-        goto cleanup;
-    }
-    if (vSwitch == NULL) {
+    if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0 ||
+            vSwitch == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not retrieve virtual switch"));
         goto cleanup;
@@ -1517,26 +1523,25 @@ success:
     result = 0;
 
 cleanup:
-    hypervFreeObject(priv, (hypervObject *) switchPort);
+    hypervFreeObject(priv, (hypervObject *) sepsd);
     hypervFreeObject(priv, (hypervObject *) vSwitch);
+    VIR_FREE(switchConnectionEscaped);
     virBufferFreeAndReset(&query);
     return result;
 }
 
 static int
 hyperv2DomainDefParseEthernet(virDomainPtr domain, virDomainDefPtr def,
-        Msvm_SyntheticEthernetPortSettingData_V2 *nets)
+        Msvm_EthernetPortAllocationSettingData_V2 *nets)
 {
     int result = -1;
-    Msvm_SyntheticEthernetPortSettingData_V2 *entry = nets;
+    Msvm_EthernetPortAllocationSettingData_V2 *entry = nets;
     hypervPrivate *priv = domain->conn->privateData;
 
     while (entry != NULL) {
-        if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_ETHERNET_ADAPTER) {
-            if (hyperv2DomainDefParseSyntheticEthernetAdapter(def, entry, priv) < 0)
-                goto cleanup;
-        }
+        if (hyperv2DomainDefParseEthernetAdapter(def, entry, priv) < 0)
+            goto cleanup;
+
         entry = entry->next;
     }
 
@@ -3640,7 +3645,7 @@ hyperv2DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_ProcessorSettingData_V2 *processorSettingData = NULL;
     Msvm_MemorySettingData_V2 *memorySettingData = NULL;
     Msvm_ResourceAllocationSettingData_V2 *rasd = NULL;
-    Msvm_SyntheticEthernetPortSettingData_V2 *nets = NULL;
+    Msvm_EthernetPortAllocationSettingData_V2 *nets = NULL;
     Msvm_StorageAllocationSettingData_V2 *sasd = NULL;
 
     /* Flags checked by virDomainDefFormat */
@@ -3706,7 +3711,7 @@ hyperv2DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     }
 
     /* Get Msvm_SyntheticEthernetPortSettingData_V2 */
-    if (hyperv2GetSyntheticEthernetPortSDByVSSDInstanceId(priv,
+    if (hyperv2GetEthernetPortAllocationSDByVSSDInstanceId(priv,
                 virtualSystemSettingData->data->InstanceID,
                 &nets) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
