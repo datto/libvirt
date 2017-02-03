@@ -571,6 +571,33 @@ cleanup:
 }
 
 static int
+hyperv2GetSASDByVSSDInstanceId(hypervPrivate *priv, const char *id,
+        Msvm_StorageAllocationSettingData_V2 **data)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    int result = -1;
+
+    virBufferAsprintf(&query,
+            "associators of "
+            "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
+            "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
+            "ResultClass = Msvm_StorageAllocationSettingData",
+            id);
+
+    if (hyperv2GetMsvmStorageAllocationSettingDataList(priv, &query, data) < 0)
+        goto cleanup;
+
+    if (*data == NULL)
+        goto cleanup;
+
+    result = 0;
+
+cleanup:
+    virBufferFreeAndReset(&query);
+    return result;
+}
+
+static int
 hyperv2GetSyntheticEthernetPortSDByVSSDInstanceId(hypervPrivate *priv,
         const char *id, Msvm_SyntheticEthernetPortSettingData_V2 **out)
 {
@@ -1105,7 +1132,7 @@ hyperv2DomainDefParseIDEStorageExtent(virDomainDefPtr def, virDomainDiskDefPtr d
         goto cleanup;
     }
 
-    addr = atoi(disk_parent->data->Address);
+    addr = atoi(disk_parent->data->AddressOnParent);
     if (addr < 0)
         goto cleanup;
 
@@ -1149,7 +1176,7 @@ hyperv2DomainDefParseSCSIStorageExtent(virDomainDefPtr def, virDomainDiskDefPtr 
         goto cleanup;
     }
 
-    addr = atoi(disk_parent->data->Address);
+    addr = atoi(disk_parent->data->AddressOnParent);
     if (addr < 0)
         goto cleanup;
 
@@ -1189,16 +1216,17 @@ cleanup:
 
 static int
 hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
-        Msvm_ResourceAllocationSettingData_V2 *rasd)
+        Msvm_ResourceAllocationSettingData_V2 *rasd,
+        Msvm_StorageAllocationSettingData_V2 *sasd)
 {
     hypervPrivate *priv = domain->conn->privateData;
     Msvm_ResourceAllocationSettingData_V2 *entry = rasd;
     Msvm_ResourceAllocationSettingData_V2 *disk_parent = NULL, *disk_ctrlr = NULL;
+    Msvm_StorageAllocationSettingData_V2 *disk_entry = sasd;
     virDomainDiskDefPtr disk = NULL;
     int result = -1;
     int scsi_idx = 0;
     int ide_idx = -1;
-    char **conn = NULL;
     char **matches = NULL;
     char **hostResource = NULL;
     ssize_t found_lun = 0;
@@ -1230,82 +1258,13 @@ hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
         entry = entry->next;
     }
 
-    /* second pass to parse disks */
+    /* second pass to parse physical disks */
     entry = rasd;
     while (entry != NULL) {
         if (entry->data->ResourceType ==
-                MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_STORAGE_EXTENT) {
-            /* reset some vars */
-            disk = NULL;
-            conn = NULL;
-
-            if (!(disk = virDomainDiskDefNew(priv->xmlopt))) {
-                virReportError(VIR_ERR_INTERNAL_ERROR, "Could not allocate DiskDef");
-                goto cleanup;
-            }
-
-            /* get disk associated with storage extent */
-            if (hyperv2GetDeviceParentRasdFromDeviceId(entry->data->Parent,
-                        rasd, &disk_parent) < 0)
-                goto cleanup;
-
-            /* get associated controller */
-            if (hyperv2GetDeviceParentRasdFromDeviceId(disk_parent->data->Parent,
-                        rasd, &disk_ctrlr) < 0)
-                goto cleanup;
-
-            /* common fields first */
-            disk->src->type = VIR_STORAGE_TYPE_FILE;
-            disk->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE;
-
-            /* note if it's a CD drive */
-            if (STREQ(entry->data->ResourceSubType, "Microsoft Virtual CD/DVD Disk")) {
-                disk->device = VIR_DOMAIN_DISK_DEVICE_CDROM;
-            } else {
-                disk->device = VIR_DOMAIN_DISK_DEVICE_DISK;
-            }
-
-            /* copy in the source path */
-            if (entry->data->Connection.count < 1)
-                goto cleanup;
-            conn = entry->data->Connection.data; /* implicit cast */
-            if (virDomainDiskSetSource(disk, *conn) < 0)
-                goto cleanup;
-
-            /* controller-specific fields */
-            switch (disk_ctrlr->data->ResourceType) {
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_PARALLEL_SCSI_HBA:
-                    if (hyperv2DomainDefParseSCSIStorageExtent(def, disk,
-                            scsiControllers, disk_parent, disk_ctrlr) < 0) {
-                        goto cleanup;
-                    }
-                    break;
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_IDE_CONTROLLER:
-                    if (hyperv2DomainDefParseIDEStorageExtent(def, disk,
-                                ideControllers, disk_parent, disk_ctrlr) < 0) {
-                        goto cleanup;
-                    }
-                    break;
-                case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_OTHER:
-                    if (disk_parent->data->ResourceType ==
-                            MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_FLOPPY) {
-                        if (hyperv2DomainDefParseFloppyStorageExtent(def, disk) < 0) {
-                            goto cleanup;
-                        }
-                        disk->device = VIR_DOMAIN_DISK_DEVICE_FLOPPY;
-                    }
-                    break;
-                default:
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                            "Unrecognized controller type %d",
-                            disk_ctrlr->data->ResourceType);
-                    goto cleanup;
-            }
-        } else if (entry->data->ResourceType ==
                 MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_DISK) {
             /* code to parse physical disk drives, i.e. LUNs */
-            if (STREQ(entry->data->ResourceSubType,
-                        "Microsoft Physical Disk Drive")) {
+            if (entry->data->HostResource.count > 0) {
                 /* clear some vars */
                 disk = NULL;
 
@@ -1337,7 +1296,7 @@ hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                     goto cleanup;
                 }
 
-                addr = atoi(entry->data->Address);
+                addr = atoi(entry->data->AddressOnParent);
                 if (addr < 0)
                     goto cleanup;
 
@@ -1383,6 +1342,77 @@ hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
             }
         }
         entry = entry->next;
+    }
+
+    while (disk_entry != NULL) {
+        if (!(disk = virDomainDiskDefNew(priv->xmlopt))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                    _("Could not allocate disk definition"));
+            goto cleanup;
+        }
+
+        /* get disk associated with storage extent */
+        if (hyperv2GetDeviceParentRasdFromDeviceId(disk_entry->data->Parent,
+                    rasd, &disk_parent) < 0)
+            goto cleanup;
+
+        /* get associated controller */
+        if (hyperv2GetDeviceParentRasdFromDeviceId(disk_parent->data->Parent,
+                    rasd, &disk_ctrlr) < 0)
+            goto cleanup;
+
+        /* common fields first */
+        disk->src->type = VIR_STORAGE_TYPE_FILE;
+        disk->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE;
+
+        /* note if it's a CDROM disk */
+        if (STREQ(disk_entry->data->ResourceSubType,
+                    "Microsoft:Hyper-V:Virtual CD/DVD Disk")) {
+            disk->device = VIR_DOMAIN_DISK_DEVICE_CDROM;
+        } else {
+            disk->device = VIR_DOMAIN_DISK_DEVICE_DISK;
+        }
+
+        /* copy in the source path */
+        if (disk_entry->data->HostResource.count < 1)
+            goto cleanup; /* TODO: maybe don't abort here? */
+        if (virDomainDiskSetSource(disk,
+                    *((char **) disk_entry->data->HostResource.data)) < 0) {
+            goto cleanup;
+        }
+
+        /* controller-specific fields */
+        switch (disk_ctrlr->data->ResourceType) {
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_PARALLEL_SCSI_HBA:
+                if (hyperv2DomainDefParseSCSIStorageExtent(def, disk,
+                        scsiControllers, disk_parent, disk_ctrlr) < 0) {
+                    goto cleanup;
+                }
+                break;
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_IDE_CONTROLLER:
+                if (hyperv2DomainDefParseIDEStorageExtent(def, disk,
+                            ideControllers, disk_parent, disk_ctrlr) < 0) {
+                    goto cleanup;
+                }
+                break;
+            case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_OTHER:
+                if (disk_parent->data->ResourceType ==
+                        MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_FLOPPY) {
+                    if (hyperv2DomainDefParseFloppyStorageExtent(def, disk) < 0) {
+                        goto cleanup;
+                    }
+                    disk->device = VIR_DOMAIN_DISK_DEVICE_FLOPPY;
+                }
+                break;
+            default:
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                        "Unrecognized controller type %d",
+                        disk_ctrlr->data->ResourceType);
+                goto cleanup;
+        }
+
+
+        disk_entry = disk_entry->next;
     }
 
     result = 0;
@@ -3611,6 +3641,7 @@ hyperv2DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     Msvm_MemorySettingData_V2 *memorySettingData = NULL;
     Msvm_ResourceAllocationSettingData_V2 *rasd = NULL;
     Msvm_SyntheticEthernetPortSettingData_V2 *nets = NULL;
+    Msvm_StorageAllocationSettingData_V2 *sasd = NULL;
 
     /* Flags checked by virDomainDefFormat */
 
@@ -3660,6 +3691,16 @@ hyperv2DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                 &rasd) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not get resource information for domain %s"),
+                computerSystem->data->ElementName);
+        goto cleanup;
+    }
+
+    /* Get Msvm_StorageAllocationSettingData_V2 */
+    if (hyperv2GetSASDByVSSDInstanceId(priv,
+                virtualSystemSettingData->data->InstanceID,
+                &sasd) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                _("Could not get storage information for domain %s"),
                 computerSystem->data->ElementName);
         goto cleanup;
     }
@@ -3732,7 +3773,7 @@ hyperv2DomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     def->nserials = 0;
 
     /* FIXME: devices section is totally missing */
-    if (hyperv2DomainDefParseStorage(domain, def, rasd) < 0)
+    if (hyperv2DomainDefParseStorage(domain, def, rasd, sasd) < 0)
         goto cleanup;
 
     if (hyperv2DomainDefParseSerial(domain, def, rasd) < 0)
