@@ -32,6 +32,7 @@
 #include "virstring.h"
 #include "virkeycode.h"
 #include "fdstream.h"
+#include "base64.h"
 
 #include "hyperv_driver.h"
 #include "hyperv_private.h"
@@ -3253,20 +3254,18 @@ hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     WsXmlDocH ret_doc = NULL;
     int xRes = 640;
     int yRes = 480;
-    WsXmlNodeH envelope = NULL;
-    WsXmlNodeH body = NULL;
-    WsXmlNodeH thumbnail = NULL;
-    xmlNodePtr base = NULL;
-    xmlNodePtr child = NULL;
     char *imageDataText = NULL;
     char *imageDataBuffer = NULL;
+    size_t imageDataBufferSize;
     char thumbnailFilename[VIR_UUID_STRING_BUFLEN + 26];
     uint16_t *bufAs16 = NULL;
     uint16_t px;
     uint8_t *ppmBuffer = NULL;
     char *result = NULL;
     FILE *fd;
-    int childCount, pixelCount, i = 0;
+    int pixelCount, i = 0;
+    const char *xpath =
+        "/s:Envelope/s:Body/p:GetVirtualSystemThumbnailImage_OUTPUT/p:ImageData";
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -3334,34 +3333,30 @@ thumbnail:
                 &ret_doc) < 0)
         goto cleanup;
 
-    envelope = ws_xml_get_soap_envelope(ret_doc);
-
-    if (!envelope) {
+    if (!ws_xml_get_soap_envelope(ret_doc)) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not retrieve thumbnail image"));
         goto cleanup;
     }
 
-    /* Extract the pixel data from XML and save to a file */
-    body = ws_xml_get_child(envelope, 1, NULL, NULL);
-    thumbnail = ws_xml_get_child(body, 0, NULL, NULL);
-    childCount = ws_xml_get_child_count(thumbnail);
-    pixelCount = childCount / 2;
+    imageDataText = ws_xml_get_xpath_value(ret_doc, (char *) xpath);
 
-    if (VIR_ALLOC_N(imageDataBuffer, childCount + 1) < 0)
+    if (!imageDataText) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Failed to retrieve image data"));
         goto cleanup;
+    }
 
+    if (!base64_decode_alloc(imageDataText, strlen(imageDataText),
+                &imageDataBuffer, &imageDataBufferSize)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Failed to decode image"));
+        goto cleanup;
+    }
+
+    pixelCount = imageDataBufferSize / 2;
     if (VIR_ALLOC_N(ppmBuffer, pixelCount * 3) < 0)
         goto cleanup;
-
-    base = (xmlNodePtr) thumbnail;
-    child = base->children;
-    while (child) {
-        imageDataText = ws_xml_get_node_text((WsXmlNodeH) child);
-        imageDataBuffer[i] = (char) atoi(imageDataText);
-        child = child->next;
-        i++;
-    }
 
     /* convert rgb565 to rgb888 */
     bufAs16 = (uint16_t *) imageDataBuffer;
