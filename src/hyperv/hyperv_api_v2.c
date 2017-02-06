@@ -4267,20 +4267,12 @@ hyperv2DomainSetAutostart(virDomainPtr domain, int autostart)
     hypervPrivate *priv = domain->conn->privateData;
     Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     properties_t *tab_props = NULL;
-    eprParam eprparam;
     embeddedParam embeddedparam;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
 
     virUUIDFormat(domain->uuid, uuid_string);
-
-    /* Prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
-    eprparam.query = &query;
-    eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* prepare embedded param */
     if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
@@ -4290,31 +4282,27 @@ hyperv2DomainSetAutostart(virDomainPtr domain, int autostart)
     if (VIR_ALLOC_N(tab_props, embeddedparam.nbProps) < 0)
         goto cleanup;
     tab_props[0].name = "AutomaticStartupAction";
-    tab_props[0].val = autostart ? "2" : "0";
+    tab_props[0].val = autostart ? "4" : "2";
     tab_props[1].name = "InstanceID";
     tab_props[1].val = vssd->data->InstanceID;
 
-    embeddedparam.instanceName = "Msvm_VirtualSystemGlobalSettingData";
+    embeddedparam.instanceName = MSVM_VIRTUALSYSTEMSETTINGDATA_V2_CLASSNAME;
     embeddedparam.prop_t = tab_props;
 
     /* set up and invoke method */
-    if (VIR_ALLOC_N(params, 2) < 0)
+    if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
-    params[0].type = EPR_PARAM;
-    params[0].param = &eprparam;
-    params[1].name = "SystemSettingData";
-    params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam;
+    params[0].name = "SystemSettings";
+    params[0].type = EMBEDDED_PARAM;
+    params[0].param = &embeddedparam;
 
-    result = hyperv2InvokeMethod(priv, params, 2, "ModifyVirtualSystem",
+    result = hyperv2InvokeMethod(priv, params, 1, "ModifySystemSettings",
             MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI, selector, NULL);
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) vssd);
     VIR_FREE(tab_props);
     VIR_FREE(params);
-    virBufferFreeAndReset(&query);
     return result;
 }
 
