@@ -1350,7 +1350,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         }
                         disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
                         disk->dst = virIndexToDiskName(ctrlr_idx * 64 + addr, "sd");
-                        disk->info.addr.drive.unit = ctrlr_idx * 64 + addr;
+                        disk->info.addr.drive.unit = addr;
                         break;
                     case MSVM_RESOURCEALLOCATIONSETTINGDATA_V1_RESOURCETYPE_IDE_CONTROLLER:
                         for (i = 0; i < HYPERV1_MAX_IDE_CONTROLLERS; i++) {
@@ -1361,7 +1361,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         }
                         disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
                         disk->dst = virIndexToDiskName(ctrlr_idx * 4 + addr, "hd");
-                        disk->info.addr.drive.unit = ctrlr_idx * 4 + addr;
+                        disk->info.addr.drive.unit = addr;
                         break;
                     default:
                         virReportError(VIR_ERR_INTERNAL_ERROR,
