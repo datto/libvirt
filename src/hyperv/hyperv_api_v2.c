@@ -1613,138 +1613,157 @@ cleanup:
 /* Functions for creating and attaching virtual devices */
 static int
 hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
-        virDomainNetDefPtr net, char *hostname)
+        virDomainNetDefPtr net, char *hostname ATTRIBUTE_UNUSED)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
-    char switchport_guid_string[VIR_UUID_STRING_BUFLEN];
-    char guest_guid_string[VIR_UUID_STRING_BUFLEN];
-    char uuid_string[VIR_UUID_STRING_BUFLEN];
-    char *vswitch_selector = NULL;
-    const char *managementservice_selector =
+    const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
-    char *virtualSystemIdentifiers = NULL;
-    char *connection__PATH = NULL;
-    unsigned char guid[VIR_UUID_BUFLEN];
-    virBuffer query = VIR_BUFFER_INITIALIZER;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    char guid_string[VIR_UUID_STRING_BUFLEN];
+    char mac_string[VIR_MAC_STRING_BUFLEN];
+    unsigned char vsi_guid[VIR_UUID_BUFLEN];
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
+    Msvm_VirtualEthernetSwitch_V2 *vSwitch = NULL;
     Msvm_ComputerSystem_V2 *computer = NULL;
-    eprParam virtualSwitch_REF, ComputerSystem_REF;
-    simpleParam virtualSwitch_Name, virtualSwitch_FriendlyName,
-                virtualSwitch_ScopeOfResidence;
-    embeddedParam ResourceSettingData;
+    embeddedParam sepsd_embedded, epasd_embedded;
+    char *switch__PATH = NULL;
+    char *sepsd__PATH = NULL;
+    char *sepsd_instance_escaped = NULL;
+    char *sepsd_instance = NULL;
+    char *virtualSystemIdentifiers = NULL;
+    char *macAddrEscaped = NULL;
+    eprParam vssd_REF;
+    properties_t *props = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
     invokeXmlParam *params = NULL;
-    properties_t *NewResources = NULL;
+    WsXmlDocH sepsd_doc = NULL;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    VIR_DEBUG("Stage 0");
 
     /*
-     * step 1: create virtual switch port
-     * https://msdn.microsoft.com/en-us/library/hh850242(v=vs.85).aspx
+     * Step 1: Create the Msvm_SyntheticEthernetPortSettingData_V2 object
+     * that holds half the settings for the new adapter we are creating
      */
-    virBufferAddLit(&query, MSVM_VIRTUALETHERNETSWITCH_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", net->data.network.name);
-    virtualSwitch_REF.query = &query;
-    virtualSwitch_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
-
-    /* generate guid for switchport */
-    virUUIDGenerate(guid);
-    virUUIDFormat(guid, switchport_guid_string);
-
-    /* build the parameters */
-    virtualSwitch_Name.value = switchport_guid_string;
-    virtualSwitch_FriendlyName.value = "Dynamic Ethernet Switch Port";
-    virtualSwitch_ScopeOfResidence.value = "";
-
-    /* create xml params */
-    if (VIR_ALLOC_N(params, 4) < 0)
+    virUUIDGenerate(vsi_guid);
+    virUUIDFormat(vsi_guid, guid_string);
+    if (virAsprintf(&virtualSystemIdentifiers, "{%s}", guid_string) < 0)
         goto cleanup;
-    params[0].name = "VirtualSwitch";
+    virMacAddrFormat(&net->mac, mac_string);
+    macAddrEscaped = virStringReplace(mac_string, ":", "");
+
+    sepsd_embedded.nbProps = 5;
+    if (VIR_ALLOC_N(props, sepsd_embedded.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "ResourceType";
+    props[0].val = "10";
+    props[1].name= "ResourceSubType";
+    props[1].val = "Microsoft:Hyper-V:Synthetic Ethernet Port";
+    props[2].name = "ElementName";
+    props[2].val = "Network Adapter";
+    props[3].name = "VirtualSystemIdentifiers";
+    props[3].val = virtualSystemIdentifiers;
+    props[4].name = "Address";
+    props[4].val = macAddrEscaped;
+    sepsd_embedded.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V2_CLASSNAME;
+    sepsd_embedded.prop_t = props;
+
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, "where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+    vssd_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &virtualSwitch_REF;
-    params[1].name = "Name";
-    params[1].type = SIMPLE_PARAM;
-    params[1].param  = &virtualSwitch_Name;
-    params[2].name = "FriendlyName";
-    params[2].type = SIMPLE_PARAM;
-    params[2].param = &virtualSwitch_FriendlyName;
-    params[3].name = "ScopeOfResidence";
-    params[3].type = SIMPLE_PARAM;
-    params[3].param = &virtualSwitch_ScopeOfResidence;
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
+    params[1].type = EMBEDDED_PARAM;
+    params[1].param = &sepsd_embedded;
 
-    if (virAsprintf(&vswitch_selector,
-                      "CreationClassName=Msvm_VirtualSwitchManagementService&"
-                      "Name=nvspwmi&SystemCreationClassName=Msvm_ComputerSystem&"
-                      "SystemName=%s", hostname) < 0)
-        goto cleanup;
-
-    if (hyperv2InvokeMethod(priv, params, 4, "CreateSwitchPort",
-                MSVM_VIRTUALETHERNETSWITCHMANAGEMENTSERVICE_V2_RESOURCE_URI,
-                vswitch_selector, NULL) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not create port for virtual switch '%s'"),
-                net->data.network.name);
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
+                selector, &sepsd_doc) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
         goto cleanup;
     }
 
     /*
-     * step 2: add the new port to the VM, which creates the connection
-     * https://msdn.microsoft.com/en-us/library/cc160705(v=vs.85).aspx
+     * Step 2: Get the Msvm_VirtualEthernetSwitch_V2 object
      */
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_VIRTUALETHERNETSWITCH_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where Name=\"%s\"", net->data.network.name);
 
-    /* generate guid for the adapter to present to the guest */
-    virUUIDGenerate(guid);
-    virUUIDFormat(guid, guest_guid_string);
-    virBufferAsprintf(&query, "{%s}", guest_guid_string);
-    virtualSystemIdentifiers = virBufferContentAndReset(&query);
+    if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0
+            || vSwitch == NULL)
+        goto cleanup;
 
-    /* build the __PATH variable of the switch port */
+    /*
+     * Step 3: Create the Msvm_EthernetPortAllocationSettingData object that
+     * holds the other half of the network configuration
+     */
+    VIR_FREE(props);
+    VIR_FREE(params);
+    virBufferFreeAndReset(&query);
+
     if (hyperv2MsvmComputerSystemFromDomain(domain, &computer) < 0)
         goto cleanup;
-    if (virAsprintf(&connection__PATH, "\\\\%s\\root\\virtualization:"
-                "Msvm_SwitchPort.CreationClassName=\"Msvm_SwitchPort\","
-                "Name=\"%s\",SystemCreationClassName=\"Msvm_VirtualSwitch\","
-                "SystemName=\"%s\"", computer->data->ElementName,
-                switchport_guid_string, net->data.network.name) < 0)
+
+    /* build the two __PATH variables */
+    if (virAsprintf(&switch__PATH, "\\\\%s\\root\\virtualization\\v2:"
+                "Msvm_VirtualEthernetSwitch.CreationClassName="
+                "\"Msvm_VirtualEthernetSwitch\",Name=\"%s\"",
+                computer->data->ElementName, net->data.network.name) < 0)
         goto cleanup;
 
-    /* build the ComputerSystem_REF parameter */
-    virUUIDFormat(domain->uuid, uuid_string);
-    virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
-    ComputerSystem_REF.query = &query;
-    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
-
-    /* build ResourceSettingData param */
-    if (VIR_ALLOC_N(NewResources, 5) < 0)
+    /* Get the sepsd instance ID out of the XML response */
+    sepsd_instance = hyperv2GetInstanceIDFromXMLResponse(sepsd_doc);
+    sepsd_instance_escaped = virStringReplace(sepsd_instance, "\\", "\\\\");
+    if (virAsprintf(&sepsd__PATH, "\\\\%s\\root\\virtualization\\v2:"
+                "Msvm_SyntheticEthernetPortSettingData.InstanceID=\"%s\"",
+                computer->data->ElementName, sepsd_instance_escaped) < 0)
         goto cleanup;
-    NewResources[0].name = "Connection";
-    NewResources[0].val = connection__PATH;
-    NewResources[1].name = "ElementName";
-    NewResources[1].val = "Network Adapter";
-    NewResources[2].name = "VirtualSystemIdentifiers";
-    NewResources[2].val = virtualSystemIdentifiers;
-    NewResources[3].name = "ResourceType";
-    NewResources[3].val = "10";
-    NewResources[4].name = "ResourceSubType";
-    NewResources[4].val = "Microsoft Synthetic Ethernet Port";
-    ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V2_CLASSNAME;
-    ResourceSettingData.prop_t = NewResources;
-    ResourceSettingData.nbProps = 5;
 
-    /* build xml params */
-    VIR_FREE(params);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, "where InstanceID=\"%s\"", vssd->data->InstanceID);
+
+    epasd_embedded.nbProps = 6;
+    if (VIR_ALLOC_N(props, epasd_embedded.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "EnabledState";
+    props[0].val = "2";
+    props[1].name = "HostResource";
+    props[1].val = switch__PATH;
+    props[2].name = "Parent";
+    props[2].val = sepsd__PATH;
+    props[3].name = "ResourceType";
+    props[3].val = "33";
+    props[4].name = "ResourceSubType";
+    props[4].val = "Microsoft:Hyper-V:Ethernet Connection";
+    props[5].name = "ElementName";
+    props[5].val = "Dynamic Ethernet Switch Port";
+    epasd_embedded.instanceName = MSVM_ETHERNETPORTALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    epasd_embedded.prop_t = props;
+
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
-    params[1].param = &ResourceSettingData;
+    params[1].param = &epasd_embedded;
 
-    /* invoke */
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
-                managementservice_selector, NULL) < 0) {
+                selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
         goto cleanup;
     }
@@ -1752,13 +1771,20 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     result = 0;
 
 cleanup:
-    VIR_FREE(vswitch_selector);
-    VIR_FREE(virtualSystemIdentifiers);
-    VIR_FREE(connection__PATH);
-    VIR_FREE(NewResources);
-    VIR_FREE(params);
-    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) vSwitch);
     hypervFreeObject(priv, (hypervObject *) computer);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    VIR_FREE(switch__PATH);
+    VIR_FREE(sepsd__PATH);
+    VIR_FREE(sepsd_instance_escaped);
+    VIR_FREE(sepsd_instance);
+    VIR_FREE(props);
+    VIR_FREE(virtualSystemIdentifiers);
+    VIR_FREE(macAddrEscaped);
+    virBufferFreeAndReset(&query);
+    VIR_FREE(params);
+    if (sepsd_doc)
+        ws_xml_destroy_doc(sepsd_doc);
 
     return result;
 }
