@@ -3943,7 +3943,7 @@ hyperv2DomainDefineXML(virConnectPtr conn, const char *xml)
 
         tab_props[0].name = "ElementName";
         tab_props[0].val = def->name;
-        embedded_param.instanceName = "Msvm_VirtualSystemSettingData";
+        embedded_param.instanceName = MSVM_VIRTUALSYSTEMSETTINGDATA_V2_CLASSNAME;
         embedded_param.prop_t = tab_props;
 
         /* Create XML params for method invocation */
@@ -4030,7 +4030,8 @@ cleanup:
         return domain;
     } else {
         VIR_DEBUG("Domain creation failed, rolling back");
-        ignore_value(hyperv2DomainUndefine(domain));
+        if (domain)
+            ignore_value(hyperv2DomainUndefine(domain));
         return NULL;
     }
 }
