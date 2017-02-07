@@ -907,6 +907,7 @@ HYPERV_DRIVER_SOURCES =									\
 		hyperv/hyperv_api_v1.c hyperv/hyperv_api_v1.h					\
 		hyperv/hyperv_api_v2.c hyperv/hyperv_api_v2.h					\
 		hyperv/hyperv_network_api_v1.c hyperv/hyperv_network_api_v1.h	\
+		hyperv/hyperv_network_api_v2.c hyperv/hyperv_network_api_v2.h	\
 		hyperv/openwsman.h
 
 HYPERV_DRIVER_GENERATED =							\

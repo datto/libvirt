@@ -40,6 +40,7 @@
 #include "hyperv_api_v1.h"
 #include "hyperv_network_api_v1.h"
 #include "hyperv_api_v2.h"
+#include "hyperv_network_api_v2.h"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
@@ -191,11 +192,11 @@ hypervSetupV2(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     d->domainSendKey = hyperv2DomainSendKey; /* TODO: get current version */
 
     /* Set up network driver functions */
-    //n->connectListNetworks = hyperv2ConnectListNetworks; /* TODO: get current version */
-    //n->connectNumOfNetworks = hyperv2ConnectNumOfNetworks; /* TODO: get current version */
-    //n->connectListDefinedNetworks = hyperv2ConnectListDefinedNetworks; /* TODO: get current version */
-    //n->networkLookupByName = hyperv2NetworkLookupByName; /* TODO: get current version */
-    //n->connectNumOfDefinedNetworks = hyperv2ConnectNumOfDefinedNetworks; /* TODO: get current version */
+    n->connectListNetworks = hyperv2ConnectListNetworks; /* TODO: get current version */
+    n->connectNumOfNetworks = hyperv2ConnectNumOfNetworks; /* TODO: get current version */
+    n->connectListDefinedNetworks = hyperv2ConnectListDefinedNetworks; /* TODO: get current version */
+    n->networkLookupByName = hyperv2NetworkLookupByName; /* TODO: get current version */
+    n->connectNumOfDefinedNetworks = hyperv2ConnectNumOfDefinedNetworks; /* TODO: get current version */
 
     /* set up capabilities */
     priv->caps = hyperv2CapsInit(priv);
