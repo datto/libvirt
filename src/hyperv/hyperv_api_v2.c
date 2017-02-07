@@ -1881,23 +1881,23 @@ hyperv2DomainCreateSCSIController(virDomainPtr domain)
         "CreationClassname=Msvm_VirtualSystemManagementService";
     virBuffer query = VIR_BUFFER_INITIALIZER;
     properties_t *props = NULL;
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     invokeXmlParam *params = NULL;
     embeddedParam ResourceSettingData;
-    eprParam ComputerSystem_REF;
+    eprParam vssd_REF;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
 
-
     VIR_DEBUG("Attaching SCSI Controller");
-    /*
-     * https://msdn.microsoft.com/en-us/library/cc160705(v=vs.85).aspx
-     */
 
-    /* prepare ComputerSystem_REF param */
     virUUIDFormat(domain->uuid, uuid_string);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
-    ComputerSystem_REF.query = &query;
-    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, "where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+    vssd_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* build ResourceSettingData param */
     if (VIR_ALLOC_N(props, 3) < 0)
@@ -1907,7 +1907,7 @@ hyperv2DomainCreateSCSIController(virDomainPtr domain)
     props[1].name = "ResourceType";
     props[1].val = "6";
     props[2].name = "ResourceSubType";
-    props[2].val = "Microsoft Synthetic SCSI Controller";
+    props[2].val = "Microsoft:Hyper-V:Synthetic SCSI Controller";
 
     ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
     ResourceSettingData.prop_t = props;
@@ -1916,24 +1916,25 @@ hyperv2DomainCreateSCSIController(virDomainPtr domain)
     /* build xml params */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
     params[1].param = &ResourceSettingData;
 
     /* invoke */
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach network"));
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not attach SCSI controller"));
         goto cleanup;
     }
 
     result = 0;
 
 cleanup:
+    hypervFreeObject(priv, (hypervObject *) vssd);
     VIR_FREE(params);
     VIR_FREE(props);
     virBufferFreeAndReset(&query);
@@ -1955,15 +1956,20 @@ hyperv2DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    invokeXmlParam *params = NULL;
-    properties_t *props = NULL;
-    eprParam eprparam1, eprparam2;
-    embeddedParam embeddedparam1, embeddedparam2;
     char *controller__PATH = NULL;
-    char *settings__PATH = NULL;
-    char *instance_temp = NULL;
+    char *ctrlrInstanceIdEscaped = NULL;
+    char *rasdInstanceIdEscaped = NULL;
+    char *addressOnParent = NULL;
     char *settings_instance_id = NULL;
+    char *rasd__PATH = NULL;
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
+    eprParam vssd_REF;
+    embeddedParam rasd_ResourceSettings;
+    embeddedParam sasd_ResourceSettings;
+    properties_t *props = NULL;
+    invokeXmlParam *params = NULL;
     WsXmlDocH response = NULL;
+
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -1971,122 +1977,131 @@ hyperv2DomainAttachStorageExtent(virDomainPtr domain, virDomainDiskDefPtr disk,
             disk->src->path, disk->info.addr.drive.unit,
             disk->info.addr.drive.controller, disk->bus);
 
-    /* First we add the settings object */
+    /*
+     * Step 1: Create the Msvm_ResourceAllocationSettingData_V2 object
+     * that represents the settings for the virtual hard drive
+     */
 
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
-    eprparam1.query = &query;
-    eprparam1.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
 
-    /* generate controller PATH */
-    instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
-    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+    vssd_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+
+    /* prepare embedded param */
+    addressOnParent = virNumToStr(disk->info.addr.drive.unit);
+
+    ctrlrInstanceIdEscaped = virStringReplace(controller->data->InstanceID,
+            "\\", "\\\\");
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
-                hostname, instance_temp) < 0)
+                hostname, ctrlrInstanceIdEscaped) < 0)
         goto cleanup;
 
-    /* create embedded params */
-    embeddedparam1.nbProps = 4;
-    if (VIR_ALLOC_N(props, embeddedparam1.nbProps) < 0)
+    rasd_ResourceSettings.nbProps = 5;
+    if (VIR_ALLOC_N(props, rasd_ResourceSettings.nbProps) < 0)
         goto cleanup;
-    props[0].name = "Parent";
-    props[0].val = controller__PATH;
-    props[1].name = "Address";
-    props[1].val = virNumToStr(disk->info.addr.drive.unit);
-    props[2].name = "ResourceType";
-    props[2].val = "22";
-    props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Synthetic Disk Drive";
-    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
-    embeddedparam1.prop_t = props;
+    props[0].name = "ResourceType";
+    props[0].val = "17";
+    props[1].name = "ResourceSubType";
+    props[1].val = "Microsoft:Hyper-V:Synthetic Disk Drive";
+    props[2].name = "ElementName";
+    props[2].val = "Hard Drive";
+    props[3].name = "AddressOnParent";
+    props[3].val = addressOnParent;
+    props[4].name = "Parent";
+    props[4].val = controller__PATH;
+    rasd_ResourceSettings.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    rasd_ResourceSettings.prop_t = props;
 
     /* create xml params */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &eprparam1;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam1;
+    params[1].param = &rasd_ResourceSettings;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
-                selector, &response) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+                selector, &response) < 0 || !response) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not attach disk"));
         goto cleanup;
     }
 
-    if (!response) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response"));
-        goto cleanup;
-    }
+    /* step 2: create the virtual settings object for the disk image */
 
-    /* step 2: create the virtual disk image */
+    /* prepare embedded param 2 */
 
-    /* get instance id of newly created disk drive from xml response */
+    /* get rasd instance id from response and create __PATH var */
     settings_instance_id = hyperv2GetInstanceIDFromXMLResponse(response);
     if (!settings_instance_id)
         goto cleanup;
 
-    /* prepare PATH variable */
-    VIR_FREE(instance_temp);
-    instance_temp = virStringReplace(settings_instance_id, "\\", "\\\\");
-    if (virAsprintf(&settings__PATH, "\\\\%s\\root\\virtualization:"
+    rasdInstanceIdEscaped = virStringReplace(settings_instance_id, "\\", "\\\\");
+    if (virAsprintf(&rasd__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
-                hostname, instance_temp) < 0)
+                hostname, rasdInstanceIdEscaped) < 0)
         goto cleanup;
 
-    /* prepare embedded param 2 */
-    VIR_FREE(props);
-    embeddedparam2.nbProps = 4;
-    if (VIR_ALLOC_N(props, embeddedparam2.nbProps) < 0)
-        goto cleanup;
-    props[0].name = "Parent";
-    props[0].val = settings__PATH;
-    props[1].name = "Connection";
-    props[1].val = disk->src->path;
-    props[2].name = "ResourceType";
-    props[2].val = "21";
-    props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Virtual Hard Disk";
-    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
-    embeddedparam2.prop_t = props;
-
+    /* reset vssd_REF param */
     virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
-    eprparam2.query = &query;
-    eprparam2.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
 
-    /* create xml params */
+    /* build embedded param */
     VIR_FREE(params);
+    VIR_FREE(props);
+    sasd_ResourceSettings.nbProps = 5;
+    if (VIR_ALLOC_N(props, sasd_ResourceSettings.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "ElementName";
+    props[0].val = "Hard Disk Image";
+    props[1].name = "ResourceType";
+    props[1].val = "31";
+    props[2].name = "ResourceSubType";
+    props[2].val = "Microsoft:Hyper-V:Virtual Hard Disk";
+    props[3].name = "HostResource";
+    props[3].val = disk->src->path;
+    props[4].name = "Parent";
+    props[4].val = rasd__PATH;
+    sasd_ResourceSettings.instanceName = MSVM_STORAGEALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    sasd_ResourceSettings.prop_t = props;
+
+    /* create invokeXmlParam */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &eprparam2;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam2;
+    params[1].param = &sasd_ResourceSettings;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not attach disk"));
         goto cleanup;
     }
 
     result = 0;
 cleanup:
-    virBufferFreeAndReset(&query);
-    VIR_FREE(params);
     VIR_FREE(props);
+    VIR_FREE(params);
     VIR_FREE(controller__PATH);
-    VIR_FREE(settings__PATH);
-    VIR_FREE(instance_temp);
+    VIR_FREE(rasd__PATH);
+    VIR_FREE(ctrlrInstanceIdEscaped);
+    VIR_FREE(rasdInstanceIdEscaped);
+    VIR_FREE(addressOnParent);
     VIR_FREE(settings_instance_id);
+    hypervFreeObject(priv, (hypervObject *) vssd);
     if (response)
         ws_xml_destroy_doc(response);
     return result;
@@ -2102,18 +2117,27 @@ hyperv2DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     char *hostResource = NULL;
     char *controller__PATH = NULL;
     char *instance_temp = NULL;
+    char *addressOnParent = NULL;
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     invokeXmlParam *params = NULL;
     properties_t *props = NULL;
-    eprParam ComputerSystem_REF;
+    eprParam vssd_REF;
     embeddedParam embeddedparam;
 
-    if (strstr(disk->src->path, "NODRIVE"))
-        goto success; /* Hyper-V doesn't let you define LUNs with no connection */
+    if (strstr(disk->src->path, "NODRIVE")) {
+        /* Hyper-V doesn't let you define LUNs with no connection */
+        VIR_DEBUG("Skipping empty LUN '%s' with address %d on bus %d of type %d",
+                disk->src->path, disk->info.addr.drive.unit,
+                disk->info.addr.drive.controller, disk->bus);
+        goto success;
+    }
 
     virUUIDFormat(domain->uuid, uuid_string);
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
 
     VIR_DEBUG("Now attaching LUN '%s' with address %d to bus %d of type %d",
             disk->src->path, disk->info.addr.drive.unit,
@@ -2121,7 +2145,7 @@ hyperv2DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
 
     /* prepare HostResource */
     /* TODO: fix this so it can access LUNs on different hosts */
-    virBufferAsprintf(&query, "\\\\%s\\root\\virtualization:"
+    virBufferAsprintf(&query, "\\\\%s\\root\\virtualization\\v2:"
             "Msvm_DiskDrive.CreationClassName=\"Msvm_DiskDrive\","
             "DeviceID=\"%s\",SystemCreationClassName=\"Msvm_ComputerSystem\","
             "SystemName=\"%s\"",
@@ -2130,17 +2154,19 @@ hyperv2DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
 
     /* prepare controller's path */
     instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
-    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
                 hostname, instance_temp) < 0) {
         goto cleanup;
     }
 
+    addressOnParent = virNumToStr(disk->info.addr.drive.unit);
+
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
-    ComputerSystem_REF.query = &query;
-    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID = \"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+    vssd_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* create embedded param */
     embeddedparam.nbProps = 5;
@@ -2148,12 +2174,12 @@ hyperv2DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
         goto cleanup;
     props[0].name = "Parent";
     props[0].val = controller__PATH;
-    props[1].name = "Address";
-    props[1].val = virNumToStr(disk->info.addr.drive.unit);
+    props[1].name = "AddressOnParent";
+    props[1].val = addressOnParent;
     props[2].name = "ResourceType";
-    props[2].val = "22";
+    props[2].val = "17";
     props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Physical Disk Drive";
+    props[3].val = "Microsoft:Hyper-V:Physical Disk Drive";
     props[4].name = "HostResource";
     props[4].val = hostResource;
     embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
@@ -2162,14 +2188,14 @@ hyperv2DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     /* create xml param */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
     params[1].param = &embeddedparam;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add LUN"));
@@ -2182,9 +2208,11 @@ cleanup:
     VIR_FREE(params);
     VIR_FREE(props);
     VIR_FREE(controller__PATH);
+    VIR_FREE(addressOnParent);
     VIR_FREE(hostResource);
     VIR_FREE(instance_temp);
     virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) vssd);
     return result;
 }
 
@@ -2198,15 +2226,20 @@ hyperv2DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    invokeXmlParam *params = NULL;
-    properties_t *props = NULL;
-    WsXmlDocH response = NULL;
-    char *instance_temp = NULL;
     char *controller__PATH = NULL;
-    char *settings__PATH = NULL;
+    char *ctrlrInstanceIdEscaped = NULL;
+    char *rasdInstanceIdEscaped = NULL;
+    char *addressOnParent = NULL;
     char *settings_instance_id = NULL;
-    eprParam ComputerSystem_REF;
-    embeddedParam embeddedparam1, embeddedparam2;
+    char *rasd__PATH = NULL;
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
+    eprParam vssd_REF;
+    embeddedParam rasd_ResourceSettings;
+    embeddedParam sasd_ResourceSettings;
+    properties_t *props = NULL;
+    invokeXmlParam *params = NULL;
+    WsXmlDocH response = NULL;
+
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -2214,126 +2247,134 @@ hyperv2DomainAttachCDROM(virDomainPtr domain, virDomainDiskDefPtr disk,
             disk->src->path, disk->info.addr.drive.unit,
             disk->info.addr.drive.controller, disk->bus);
 
+    /*
+     * Step 1: Create the Msvm_ResourceAllocationSettingData_V2 object
+     * that represents the settings for the virtual hard drive
+     */
+
     /* prepare EPR param */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
-    ComputerSystem_REF.query = &query;
-    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
 
-    /* generate controller PATH */
-    instance_temp = virStringReplace(controller->data->InstanceID, "\\", "\\\\");
-    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization:"
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+    vssd_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
+
+    /* prepare embedded param */
+    addressOnParent = virNumToStr(disk->info.addr.drive.unit);
+
+    ctrlrInstanceIdEscaped = virStringReplace(controller->data->InstanceID,
+            "\\", "\\\\");
+    if (virAsprintf(&controller__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
-                hostname, instance_temp) < 0)
+                hostname, ctrlrInstanceIdEscaped) < 0)
         goto cleanup;
 
-    /* create embedded param for synthetic DVD drive */
-    embeddedparam1.nbProps = 4;
-    if (VIR_ALLOC_N(props, embeddedparam1.nbProps) < 0)
+    rasd_ResourceSettings.nbProps = 5;
+    if (VIR_ALLOC_N(props, rasd_ResourceSettings.nbProps) < 0)
         goto cleanup;
-    props[0].name = "Parent";
-    props[0].val = controller__PATH;
-    props[1].name = "Address";
-    props[1].val = virNumToStr(disk->info.addr.drive.unit);
-    props[2].name = "ResourceType";
-    props[2].val = "16";
-    props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Synthetic DVD Drive";
-    embeddedparam1.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
-    embeddedparam1.prop_t = props;
+    props[0].name = "ResourceType";
+    props[0].val = "17";
+    props[1].name = "ResourceSubType";
+    props[1].val = "Microsoft:Hyper-V:Synthetic DVD Drive";
+    props[2].name = "ElementName";
+    props[2].val = "Hard Drive";
+    props[3].name = "AddressOnParent";
+    props[3].val = addressOnParent;
+    props[4].name = "Parent";
+    props[4].val = controller__PATH;
+    rasd_ResourceSettings.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    rasd_ResourceSettings.prop_t = props;
 
+    /* create xml params */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam1;
+    params[1].param = &rasd_ResourceSettings;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
-                selector, &response) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add DVD drive"));
+                selector, &response) < 0 || !response) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not attach disk"));
         goto cleanup;
     }
 
-    if (!response) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not get response"));
-        goto cleanup;
-    }
-
-    /* step 2: put an ISO into the virtual DVD drive we just created */
-
-    settings_instance_id = hyperv2GetInstanceIDFromXMLResponse(response);
-    if (!settings_instance_id)
-        goto cleanup;
-
-    /* get instance id of newly created DVD drive from xml response */
-    settings_instance_id = hyperv2GetInstanceIDFromXMLResponse(response);
-    if (!settings_instance_id)
-        goto cleanup;
-
-    /* prepare parent reference */
-    VIR_FREE(instance_temp);
-    instance_temp = virStringReplace(settings_instance_id, "\\", "\\\\");
-    if (virAsprintf(&settings__PATH, "\\\\%s\\root\\virtualization:"
-                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
-                hostname, instance_temp) < 0)
-        goto cleanup;
-
-    /* refresh buffer */
-    virBufferFreeAndReset(&query);
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    /* step 2: create the virtual settings object for the disk image */
 
     /* prepare embedded param 2 */
-    VIR_FREE(props);
-    embeddedparam2.nbProps = 4;
-    if (VIR_ALLOC_N(props, embeddedparam2.nbProps) < 0)
-        goto cleanup;
-    props[0].name = "Parent";
-    props[0].val = settings__PATH;
-    props[1].name = "Connection";
-    props[1].val = disk->src->path;
-    props[2].name = "ResourceType";
-    props[2].val = "21";
-    props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Virtual CD/DVD Disk";
-    embeddedparam2.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
-    embeddedparam2.prop_t = props;
 
-    /* prepare XML params */
+    /* get rasd instance id from response and create __PATH var */
+    settings_instance_id = hyperv2GetInstanceIDFromXMLResponse(response);
+    if (!settings_instance_id)
+        goto cleanup;
+
+    rasdInstanceIdEscaped = virStringReplace(settings_instance_id, "\\", "\\\\");
+    if (virAsprintf(&rasd__PATH, "\\\\%s\\root\\virtualization\\v2:"
+                "Msvm_ResourceAllocationSettingData.InstanceID=\"%s\"",
+                hostname, rasdInstanceIdEscaped) < 0)
+        goto cleanup;
+
+    /* reset vssd_REF param */
+    virBufferFreeAndReset(&query);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID=\"%s\"", vssd->data->InstanceID);
+    vssd_REF.query = &query;
+
+    /* build embedded param */
     VIR_FREE(params);
+    VIR_FREE(props);
+    sasd_ResourceSettings.nbProps = 5;
+    if (VIR_ALLOC_N(props, sasd_ResourceSettings.nbProps) < 0)
+        goto cleanup;
+    props[0].name = "ElementName";
+    props[0].val = "Hard Disk Image";
+    props[1].name = "ResourceType";
+    props[1].val = "31";
+    props[2].name = "ResourceSubType";
+    props[2].val = "Microsoft:Hyper-V:Virtual CD/DVD Disk";
+    props[3].name = "HostResource";
+    props[3].val = disk->src->path;
+    props[4].name = "Parent";
+    props[4].val = rasd__PATH;
+    sasd_ResourceSettings.instanceName = MSVM_STORAGEALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    sasd_ResourceSettings.prop_t = props;
+
+    /* create invokeXmlParam */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
+    params[0].param = &vssd_REF;
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
-    params[1].param = &embeddedparam2;
+    params[1].param = &sasd_ResourceSettings;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add disk"));
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not attach disk"));
         goto cleanup;
     }
 
     result = 0;
 cleanup:
+    VIR_FREE(props);
     VIR_FREE(params);
     VIR_FREE(controller__PATH);
-    VIR_FREE(settings__PATH);
-    VIR_FREE(instance_temp);
+    VIR_FREE(rasd__PATH);
+    VIR_FREE(ctrlrInstanceIdEscaped);
+    VIR_FREE(rasdInstanceIdEscaped);
+    VIR_FREE(addressOnParent);
     VIR_FREE(settings_instance_id);
-    VIR_FREE(props);
-    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) vssd);
     if (response)
         ws_xml_destroy_doc(response);
     return result;
-
 }
 
 static int
@@ -2346,6 +2387,7 @@ hyperv2DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
         "CreationClassName=Msvm_VirtualSystemManagementService";
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     invokeXmlParam *params = NULL;
     properties_t *props = NULL;
     embeddedParam embeddedparam;
@@ -2354,6 +2396,8 @@ hyperv2DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
     char *settings__PATH = NULL;
 
     virUUIDFormat(domain->uuid, uuid_string);
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
 
     VIR_DEBUG("Attaching floppy image '%s'", disk->src->path);
 
@@ -2370,31 +2414,31 @@ hyperv2DomainAttachFloppy(virDomainPtr domain, virDomainDiskDefPtr disk,
         goto cleanup;
     props[0].name = "Parent";
     props[0].val = settings__PATH;
-    props[1].name = "Connection";
+    props[1].name = "HostResource";
     props[1].val = disk->src->path;
     props[2].name = "ResourceType";
-    props[2].val = "21";
+    props[2].val = "31";
     props[3].name = "ResourceSubType";
-    props[3].val = "Microsoft Virtual Floppy Disk";
-    embeddedparam.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
+    props[3].val = "Microsoft:Hyper-V:Virtual Floppy Disk";
+    embeddedparam.instanceName = MSVM_STORAGEALLOCATIONSETTINGDATA_V2_CLASSNAME;
     embeddedparam.prop_t = props;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name = \"%s\"", uuid_string);
+    virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
+    virBufferAsprintf(&query, " where InstanceID = \"%s\"", vssd->data->InstanceID);
     eprparam.query = &query;
     eprparam.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
 
     /* create xml params */
     if (VIR_ALLOC_N(params, 2) < 0)
         goto cleanup;
-    params[0].name = "TargetSystem";
+    params[0].name = "AffectedConfiguration";
     params[0].type = EPR_PARAM;
     params[0].param = &eprparam;
-    params[1].name = "ResourceSettingData";
+    params[1].name = "ResourceSettings";
     params[1].type = EMBEDDED_PARAM;
     params[1].param = &embeddedparam;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "AddVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 2, "AddResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add floppy disk"));
@@ -2408,6 +2452,7 @@ cleanup:
     VIR_FREE(instance_temp);
     VIR_FREE(settings__PATH);
     virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) vssd);
     return result;
 }
 
