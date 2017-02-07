@@ -1801,7 +1801,6 @@ hyperv2DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     Msvm_ResourceAllocationSettingData_V2 *rasd = NULL;
     Msvm_ResourceAllocationSettingData_V2 *entry = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    eprParam ComputerSystem_REF;
     embeddedParam ResourceSettingData;
     properties_t *props = NULL;
     invokeXmlParam *params = NULL;
@@ -1832,12 +1831,6 @@ hyperv2DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     if (entry == NULL)
         goto cleanup;
 
-    /* build Msvm_ComputerSystem_V2 ref */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", uuid_string);
-    ComputerSystem_REF.query = &query;
-    ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION_V2;
-
     /* build rasd param */
     ResourceSettingData.nbProps = 4;
     if (VIR_ALLOC_N(props, ResourceSettingData.nbProps) < 0)
@@ -1850,23 +1843,20 @@ hyperv2DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     props[1].name = "InstanceID";
     props[1].val = entry->data->InstanceID;
     props[2].name = "ResourceType";
-    props[2].val = "17"; /* shouldn't be hardcoded but whatever */
+    props[2].val = "21"; /* shouldn't be hardcoded but whatever */
     props[3].name = "ResourceSubType";
     props[3].val = entry->data->ResourceSubType;
     ResourceSettingData.instanceName = MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_CLASSNAME;
     ResourceSettingData.prop_t = props;
 
     /* build xml params object */
-    if (VIR_ALLOC_N(params, 2) < 0)
+    if (VIR_ALLOC_N(params, 1) < 0)
         goto cleanup;
-    params[0].name = "ComputerSystem";
-    params[0].type = EPR_PARAM;
-    params[0].param = &ComputerSystem_REF;
-    params[1].name = "ResourceSettingData";
-    params[1].type = EMBEDDED_PARAM;
-    params[1].param = &ResourceSettingData;
+    params[0].name = "ResourceSettings";
+    params[0].type = EMBEDDED_PARAM;
+    params[0].param = &ResourceSettingData;
 
-    if (hyperv2InvokeMethod(priv, params, 2, "ModifyVirtualSystemResources",
+    if (hyperv2InvokeMethod(priv, params, 1, "ModifyResourceSettings",
                 MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_V2_RESOURCE_URI,
                 selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not add serial device"));
