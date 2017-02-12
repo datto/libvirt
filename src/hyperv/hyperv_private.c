@@ -41,13 +41,11 @@ hypervFreePrivate(hypervPrivate **priv)
         wsmc_release((*priv)->client);
     }
 
-    if ((*priv)->caps != NULL) {
+    if ((*priv)->caps != NULL)
         virObjectUnref((*priv)->caps);
-    }
 
-    if ((*priv)->xmlopt != NULL) {
+    if ((*priv)->xmlopt != NULL)
         virObjectUnref((*priv)->xmlopt);
-    }
 
     hypervFreeParsedUri(&(*priv)->parsedUri);
     VIR_FREE(*priv);

@@ -120,9 +120,8 @@ hypervSetupV1(virHypervisorDriverPtr d, virNetworkDriverPtr n,
 
     /* set up capabilities */
     priv->caps = hyperv1CapsInit(priv);
-    if (priv->caps == NULL) {
+    if (priv->caps == NULL)
         goto cleanup;
-    }
 
     result = 0;
 
@@ -200,9 +199,8 @@ hypervSetupV2(virHypervisorDriverPtr d, virNetworkDriverPtr n,
 
     /* set up capabilities */
     priv->caps = hyperv2CapsInit(priv);
-    if (priv->caps == NULL) {
+    if (priv->caps == NULL)
         goto cleanup;
-    }
 
     result = 0;
 

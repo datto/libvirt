@@ -130,9 +130,8 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
             virBufferAddLit(&query, MSVM_CONCRETEJOB_V2_WQL_SELECT);
             virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
 
-            if (hyperv2GetMsvmConcreteJobList(priv, &query, &job) < 0) {
+            if (hyperv2GetMsvmConcreteJobList(priv, &query, &job) < 0)
                 goto cleanup;
-            }
 
             if (!job) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -143,7 +142,7 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
 
             /* do things depending on the state */
             jobState = job->data->JobState;
-            switch(jobState) {
+            switch (jobState) {
                 case MSVM_CONCRETEJOB_V2_JOBSTATE_NEW:
                 case MSVM_CONCRETEJOB_V2_JOBSTATE_STARTING:
                 case MSVM_CONCRETEJOB_V2_JOBSTATE_RUNNING:
@@ -214,7 +213,7 @@ hyperv2InvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParamete
 
     /* Process and include parameters */
     for (i = 0; i < nbParameters; i++) {
-        switch(param_t[i].type) {
+        switch (param_t[i].type) {
             case SIMPLE_PARAM:
                 simple = (simpleParam *) param_t[i].param;
                 if (hypervAddSimpleParam(param_t[i].name, simple->value,
@@ -261,9 +260,8 @@ hyperv2InvokeMethod(hypervPrivate *priv, invokeXmlParam *param_t, int nbParamete
 
     result = 0;
 cleanup:
-    if (!doc) {
+    if (!doc)
         ws_xml_destroy_doc(doc);
-    }
     return result;
 }
 
@@ -317,9 +315,8 @@ hyperv2GetActiveVirtualSystemList(hypervPrivate *priv,
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_ACTIVE);
 
-    if (hyperv2GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0) {
+    if (hyperv2GetMsvmComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
-    }
 
     result = 0;
 
@@ -971,33 +968,28 @@ hyperv2CapsInit(hypervPrivate *priv)
         return NULL;
     }
 
-    if (hyperv2LookupHostSystemBiosUuid(priv, caps->host.host_uuid) < 0) {
+    if (hyperv2LookupHostSystemBiosUuid(priv, caps->host.host_uuid) < 0)
         goto error;
-    }
 
     /* i686 caps */
     guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_I686,
             NULL, NULL, 0, NULL);
-    if (guest == NULL) {
+    if (guest == NULL)
         goto error;
-    }
 
     if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL,
-                0, NULL) == NULL) {
+                0, NULL) == NULL)
         goto error;
-    }
 
     /* x86_64 caps */
     guest = virCapabilitiesAddGuest(caps, VIR_DOMAIN_OSTYPE_HVM, VIR_ARCH_X86_64,
             NULL, NULL, 0, NULL);
-    if (guest == NULL) {
+    if (guest == NULL)
         goto error;
-    }
 
     if (virCapabilitiesAddGuestDomain(guest, VIR_DOMAIN_VIRT_HYPERV, NULL, NULL,
-                0, NULL) == NULL) {
+                0, NULL) == NULL)
         goto error;
-    }
 
     return caps;
 
@@ -1398,9 +1390,8 @@ hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
             case MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_OTHER:
                 if (disk_parent->data->ResourceType ==
                         MSVM_RESOURCEALLOCATIONSETTINGDATA_V2_RESOURCETYPE_FLOPPY) {
-                    if (hyperv2DomainDefParseFloppyStorageExtent(def, disk) < 0) {
+                    if (hyperv2DomainDefParseFloppyStorageExtent(def, disk) < 0)
                         goto cleanup;
-                    }
                     disk->device = VIR_DOMAIN_DISK_DEVICE_FLOPPY;
                 }
                 break;
@@ -1662,7 +1653,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
         goto cleanup;
     props[0].name = "ResourceType";
     props[0].val = "10";
-    props[1].name= "ResourceSubType";
+    props[1].name = "ResourceSubType";
     props[1].val = "Microsoft:Hyper-V:Synthetic Ethernet Port";
     props[2].name = "ElementName";
     props[2].val = "Network Adapter";
@@ -2532,7 +2523,7 @@ hyperv2DomainAttachStorage(virDomainPtr domain, virDomainDefPtr def,
     for (i = 0; i < def->ndisks; i++) {
         ctrlr_idx = def->disks[i]->info.addr.drive.controller;
 
-        switch(def->disks[i]->bus) {
+        switch (def->disks[i]->bus) {
             case VIR_DOMAIN_DISK_BUS_IDE:
                 /* ide disk */
                 if (hyperv2DomainAttachStorageVolume(domain, def->disks[i],
@@ -2594,9 +2585,8 @@ hyperv2ConnectGetVersion(virConnectPtr conn, unsigned long *version)
     char *p;
 
     virBufferAddLit(&query, "Select * from CIM_DataFile where Name='c:\\\\windows\\\\system32\\\\vmms.exe' ");
-    if (hypervGetCIMDataFileList(priv, &query, &datafile) < 0) {
+    if (hypervGetCIMDataFileList(priv, &query, &datafile) < 0)
         goto cleanup;
-    }
 
     if (datafile == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -3456,7 +3446,7 @@ thumbnail:
 
     /* convert rgb565 to rgb888 */
     bufAs16 = (uint16_t *) imageDataBuffer;
-    for (i=0; i < pixelCount; i++) {
+    for (i = 0; i < pixelCount; i++) {
         px = bufAs16[i];
         ppmBuffer[i*3] = ((((px >> 11) & 0x1F) * 527) + 23) >> 6;
         ppmBuffer[i*3+1] = ((((px >> 5) & 0x3F) * 259) + 33) >> 6;
@@ -3533,9 +3523,8 @@ hyperv2DomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0) {
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
         goto cleanup;
-    }
 
     if (hyperv2GetProcSDByVSSDInstanceId(priv, vssd->data->InstanceID,
                 &proc_sd) < 0) {
@@ -3593,9 +3582,8 @@ hyperv2DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
     virUUIDFormat(domain->uuid, uuid_string);
 
     /* Start by getting the Msvm_ComputerSystem_V2 */
-    if (hyperv2MsvmComputerSystemFromDomain(domain, &computerSystem) < 0) {
+    if (hyperv2MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
-    }
 
     /* Check @flags to see if we are to query a running domain, and fail
      * if that domain is not running */
@@ -3612,9 +3600,8 @@ hyperv2DomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0) {
+    if (hyperv2GetVSSDFromUUID(priv, uuid_string, &vssd) < 0)
         goto cleanup;
-    }
 
     if (hyperv2GetProcSDByVSSDInstanceId(priv, vssd->data->InstanceID,
                 &proc_sd) < 0) {
@@ -3642,9 +3629,8 @@ hyperv2DomainGetVcpus(virDomainPtr domain, virVcpuInfoPtr info, int maxinfo,
         *vproc = NULL;
 
     /* No cpumaps info returned by this api, so null out cpumaps */
-    if ((cpumaps != NULL) && (maplen > 0)) {
+    if ((cpumaps != NULL) && (maplen > 0))
         memset(cpumaps, 0, maxinfo * maplen);
-    }
 
     for (i = 0; i < maxinfo; i++) {
         /* try to free objects from previous iteration */
@@ -4201,7 +4187,7 @@ hyperv2DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
 
     hostname = host->data->ElementName;
 
-    switch(dev->type) {
+    switch (dev->type) {
         case VIR_DOMAIN_DEVICE_DISK:
             /* get our controller
              *
@@ -4220,7 +4206,7 @@ hyperv2DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
              * in hyperv2DomainAttachStorage(). This code tries to perform in the
              * same way to make things as consistent as possible.
              */
-            switch(dev->data.disk->bus) {
+            switch (dev->data.disk->bus) {
                 case VIR_DOMAIN_DISK_BUS_IDE:
                     while (entry != NULL) {
                         if (entry->data->ResourceType ==
@@ -4432,14 +4418,14 @@ hyperv2DomainGetSchedulerParametersFlags(virDomainPtr domain,
     saved_nparams++;
 
     if (*nparams > saved_nparams) {
-        if (virTypedParameterAssign(&params[1],VIR_DOMAIN_SCHEDULER_RESERVATION,
+        if (virTypedParameterAssign(&params[1], VIR_DOMAIN_SCHEDULER_RESERVATION,
                                     VIR_TYPED_PARAM_LLONG, proc_sd->data->Reservation) < 0)
             goto cleanup;
         saved_nparams++;
     }
 
     if (*nparams > saved_nparams) {
-        if (virTypedParameterAssign(&params[2],VIR_DOMAIN_SCHEDULER_WEIGHT,
+        if (virTypedParameterAssign(&params[2], VIR_DOMAIN_SCHEDULER_WEIGHT,
                                     VIR_TYPED_PARAM_UINT, proc_sd->data->Weight) < 0)
             goto cleanup;
         saved_nparams++;
@@ -4467,9 +4453,8 @@ hyperv2NodeGetFreeMemory(virConnectPtr conn)
     /* Get Win32_OperatingSystem */
     virBufferAddLit(&query, WIN32_OPERATINGSYSTEM_WQL_SELECT);
 
-    if (hypervGetWin32OperatingSystemList(priv, &query, &operatingSystem) < 0) {
+    if (hypervGetWin32OperatingSystemList(priv, &query, &operatingSystem) < 0)
         goto cleanup;
-    }
 
     if (operatingSystem == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,

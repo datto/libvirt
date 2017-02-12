@@ -346,12 +346,10 @@ hypervAddEprParam(const char *paramName, virBufferPtr query, const char *root,
     result = 0;
 
 cleanup:
-    if (options != NULL) {
+    if (options != NULL)
         wsmc_options_destroy(options);
-    }
-    if (filter != NULL) {
+    if (filter != NULL)
         filter_destroy(filter);
-    }
     ws_xml_destroy_doc(xmlDocResponse);
     VIR_FREE(enumContext);
     VIR_FREE(query_string);
@@ -500,9 +498,8 @@ cleanup:
     VIR_FREE(internalClassName);
     ws_xml_destroy_doc(xmlDocCdata);
     ws_xml_destroy_doc(xmlDocTemp);
-    if (!xmlBufferNode) {
+    if (!xmlBufferNode)
         xmlBufferFree(xmlBufferNode);
-    }
     return result;
 }
 

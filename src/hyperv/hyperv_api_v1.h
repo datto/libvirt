@@ -91,10 +91,10 @@ enum _Msvm_ResourceAllocationSettingData_v1_ResourceType {
 virCapsPtr hyperv1CapsInit(hypervPrivate *priv);
 
 /* Driver functions */
-const char *hyperv1ConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED);
+const char *hyperv1ConnectGetType(virConnectPtr conn);
 char *hyperv1ConnectGetHostname(virConnectPtr conn);
 int hyperv1ConnectGetVersion(virConnectPtr conn, unsigned long *version);
-int hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED);
+int hyperv1ConnectGetMaxVcpus(virConnectPtr conn, const char *type);
 int hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info);
 int hyperv1ConnectListDomains(virConnectPtr conn, int *ids, int maxids);
 int hyperv1ConnectNumOfDomains(virConnectPtr conn);
@@ -116,7 +116,7 @@ int hyperv1DomainShutdownFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainReboot(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainDestroyFlags(virDomainPtr domain, unsigned int flags);
 int hyperv1DomainDestroy(virDomainPtr domain);
-char *hyperv1DomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED);
+char *hyperv1DomainGetOSType(virDomainPtr domain);
 unsigned long long hyperv1DomainGetMaxMemory(virDomainPtr domain);
 int hyperv1DomainSetMaxMemory(virDomainPtr domain, unsigned long memory);
 int hyperv1DomainSetMemory(virDomainPtr domain, unsigned long memory);

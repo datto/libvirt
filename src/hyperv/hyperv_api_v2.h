@@ -94,10 +94,10 @@ enum _Msvm_ResourceAllocationSettingData_v2_ResourceType {
 virCapsPtr hyperv2CapsInit(hypervPrivate *priv);
 
 /* Driver functions */
-const char *hyperv2ConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED);
+const char *hyperv2ConnectGetType(virConnectPtr conn);
 char *hyperv2ConnectGetHostname(virConnectPtr conn);
 int hyperv2ConnectGetVersion(virConnectPtr conn, unsigned long *version);
-int hyperv2ConnectGetMaxVcpus(virConnectPtr conn, const char *type ATTRIBUTE_UNUSED);
+int hyperv2ConnectGetMaxVcpus(virConnectPtr conn, const char *type);
 int hyperv2NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info);
 int hyperv2ConnectListDomains(virConnectPtr conn, int *ids, int maxids);
 int hyperv2ConnectNumOfDomains(virConnectPtr conn);
@@ -119,7 +119,7 @@ int hyperv2DomainShutdownFlags(virDomainPtr domain, unsigned int flags);
 int hyperv2DomainReboot(virDomainPtr domain, unsigned int flags);
 int hyperv2DomainDestroyFlags(virDomainPtr domain, unsigned int flags);
 int hyperv2DomainDestroy(virDomainPtr domain);
-char *hyperv2DomainGetOSType(virDomainPtr domain ATTRIBUTE_UNUSED);
+char *hyperv2DomainGetOSType(virDomainPtr domain);
 unsigned long long hyperv2DomainGetMaxMemory(virDomainPtr domain);
 int hyperv2DomainSetMaxMemory(virDomainPtr domain, unsigned long memory);
 int hyperv2DomainSetMemory(virDomainPtr domain, unsigned long memory);
