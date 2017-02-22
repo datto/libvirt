@@ -1411,7 +1411,7 @@ hyperv2DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
 cleanup:
     if (result != 0 && disk)
             virDomainDiskDefFree(disk);
-    virStringFreeList(matches);
+    virStringListFree(matches);
 
     return result;
 }
@@ -1567,10 +1567,10 @@ hyperv2DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
             if (port_num < 1)
                 goto next;
 
-            serial = virDomainChrDefNew();
+            serial = virDomainChrDefNew(NULL);
 
             serial->deviceType = VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL;
-            serial->source.type = VIR_DOMAIN_CHR_TYPE_PIPE;
+            serial->source->type = VIR_DOMAIN_CHR_TYPE_PIPE;
             serial->target.port = port_num;
 
             /* set up source */
@@ -1584,7 +1584,7 @@ hyperv2DomainDefParseSerial(virDomainPtr domain ATTRIBUTE_UNUSED,
                     srcPath = *conn;
             }
 
-            if (VIR_STRDUP(serial->source.data.file.path, srcPath) < 0)
+            if (VIR_STRDUP(serial->source->data.file.path, srcPath) < 0)
                 goto cleanup;
 
             if (VIR_APPEND_ELEMENT(def->serials, def->nserials, serial) < 0) {
@@ -1827,8 +1827,8 @@ hyperv2DomainAttachSerial(virDomainPtr domain, virDomainChrDefPtr serial)
     if (VIR_ALLOC_N(props, ResourceSettingData.nbProps) < 0)
         goto cleanup;
     props[0].name = "Connection";
-    if (STRNEQ(serial->source.data.file.path, "-1"))
-        props[0].val = serial->source.data.file.path;
+    if (STRNEQ(serial->source->data.file.path, "-1"))
+        props[0].val = serial->source->data.file.path;
     else
         props[0].val = "";
     props[1].name = "InstanceID";
