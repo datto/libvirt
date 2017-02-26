@@ -359,9 +359,7 @@ hyperv2GetPhysicalSystemList(hypervPrivate *priv,
     virBuffer query = VIR_BUFFER_INITIALIZER;
     int result = -1;
 
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_V2_WQL_PHYSICAL);
+    virBufferAddLit(&query, WIN32_COMPUTERSYSTEM_WQL_SELECT);
 
     if (hypervGetWin32ComputerSystemList(priv, &query, computerSystemList) < 0)
         goto cleanup;
