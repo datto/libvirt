@@ -2646,7 +2646,7 @@ hyperv1NodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     }
 
     info->cores = processorList->data->NumberOfCores;
-    info->threads = info->cores / processorList->data->NumberOfLogicalProcessors;
+    info->threads = processorList->data->NumberOfLogicalProcessors / info->cores;
     info->cpus = info->sockets * info->cores;
 
     result = 0;
