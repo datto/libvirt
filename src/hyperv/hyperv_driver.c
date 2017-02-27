@@ -352,7 +352,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     VIR_DEBUG("Windows version reported as '%s'", winVersion);
     if (!winVersion) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                _("Could not determine Windows version"));
+                _("Could not determine Windows version. Check username and password."));
         goto cleanup;
     }
 
