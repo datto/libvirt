@@ -245,12 +245,13 @@ hypervConnectGetHostname(virConnectPtr conn)
 {
     char *hostname = NULL;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Win32_ComputerSystem *computerSystem = NULL;
 
-    virBufferAddLit(&query, WIN32_COMPUTERSYSTEM_WQL_SELECT);
+    wqlSelect.info = Win32_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = WIN32_COMPUTERSYSTEM_WQL_SELECT;
 
-    if (hypervGetWin32ComputerSystemList(priv, &query, &computerSystem) < 0)
+    if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem == NULL) {
@@ -260,7 +261,7 @@ hypervConnectGetHostname(virConnectPtr conn)
         goto cleanup;
     }
 
-    ignore_value(VIR_STRDUP(hostname, computerSystem->data->DNSHostName));
+    ignore_value(VIR_STRDUP(hostname, computerSystem->data.common->DNSHostName));
 
  cleanup:
     hypervFreeObject(priv, (hypervObject *)computerSystem);
@@ -276,6 +277,7 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     int result = -1;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Win32_ComputerSystem *computerSystem = NULL;
     Win32_Processor *processorList = NULL;
     Win32_Processor *processor = NULL;
@@ -284,9 +286,11 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     memset(info, 0, sizeof(*info));
 
     virBufferAddLit(&query, WIN32_COMPUTERSYSTEM_WQL_SELECT);
+    wqlSelect.info = Win32_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
 
     /* Get Win32_ComputerSystem */
-    if (hypervGetWin32ComputerSystemList(priv, &query, &computerSystem) < 0)
+    if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) &computerSystem) < 0)
         goto cleanup;
 
     if (computerSystem == NULL) {
@@ -302,9 +306,12 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
                       "{Win32_ComputerSystem.Name=\"%s\"} "
                       "where AssocClass = Win32_ComputerSystemProcessor "
                       "ResultClass = Win32_Processor",
-                      computerSystem->data->Name);
+                      computerSystem->data.common->Name);
 
-    if (hypervGetWin32ProcessorList(priv, &query, &processorList) < 0)
+    wqlSelect.info = Win32_Processor_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) &processorList) < 0)
         goto cleanup;
 
     if (processorList == NULL) {
@@ -315,7 +322,7 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     }
 
     /* Strip the string to fit more relevant information in 32 chars */
-    tmp = processorList->data->Name;
+    tmp = processorList->data.common->Name;
 
     while (*tmp != '\0') {
         if (STRPREFIX(tmp, "  ")) {
@@ -333,16 +340,16 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
     }
 
     /* Fill struct */
-    if (virStrncpy(info->model, processorList->data->Name,
+    if (virStrncpy(info->model, processorList->data.common->Name,
                    sizeof(info->model) - 1, sizeof(info->model)) == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("CPU model %s too long for destination"),
-                       processorList->data->Name);
+                       processorList->data.common->Name);
         goto cleanup;
     }
 
-    info->memory = computerSystem->data->TotalPhysicalMemory / 1024; /* byte to kilobyte */
-    info->mhz = processorList->data->MaxClockSpeed;
+    info->memory = computerSystem->data.common->TotalPhysicalMemory / 1024; /* byte to kilobyte */
+    info->mhz = processorList->data.common->MaxClockSpeed;
     info->nodes = 1;
     info->sockets = 0;
 
@@ -351,8 +358,8 @@ hypervNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info)
         ++info->sockets;
     }
 
-    info->cores = processorList->data->NumberOfCores;
-    info->threads = info->cores / processorList->data->NumberOfLogicalProcessors;
+    info->cores = processorList->data.common->NumberOfCores;
+    info->threads = info->cores / processorList->data.common->NumberOfLogicalProcessors;
     info->cpus = info->sockets * info->cores;
 
     result = 0;
@@ -372,6 +379,7 @@ hypervConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -385,14 +393,16 @@ hypervConnectListDomains(virConnectPtr conn, int *ids, int maxids)
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) &computerSystemList) < 0) {
         goto cleanup;
     }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
-        ids[count++] = computerSystem->data->ProcessID;
+        ids[count++] = computerSystem->data.common->ProcessID;
 
         if (count >= maxids)
             break;
@@ -414,6 +424,7 @@ hypervConnectNumOfDomains(virConnectPtr conn)
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -424,8 +435,11 @@ hypervConnectNumOfDomains(virConnectPtr conn)
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_ACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystemList) < 0) {
         goto cleanup;
     }
 
@@ -450,6 +464,7 @@ hypervDomainLookupByID(virConnectPtr conn, int id)
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
@@ -457,7 +472,11 @@ hypervDomainLookupByID(virConnectPtr conn, int id)
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and ProcessID = %d", id);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystem) < 0) 
         goto cleanup;
 
     if (computerSystem == NULL) {
@@ -482,6 +501,7 @@ hypervDomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     hypervPrivate *priv = conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
     virUUIDFormat(uuid, uuid_string);
@@ -491,7 +511,11 @@ hypervDomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystem) < 0) 
         goto cleanup;
 
     if (computerSystem == NULL) {
@@ -516,6 +540,7 @@ hypervDomainLookupByName(virConnectPtr conn, const char *name)
     virDomainPtr domain = NULL;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
 
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
@@ -523,7 +548,11 @@ hypervDomainLookupByName(virConnectPtr conn, const char *name)
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and ElementName = \"%s\"", name);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystem) < 0) 
         goto cleanup;
 
     if (computerSystem == NULL) {
@@ -552,13 +581,14 @@ hypervDomainSuspend(virDomainPtr domain)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (computerSystem->data->EnabledState !=
+    if (computerSystem->data.common->EnabledState !=
         MSVM_COMPUTERSYSTEM_ENABLEDSTATE_ENABLED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not active"));
         goto cleanup;
     }
 
+    /* FIXME: v1 only - invokes not ported yet */
     result = hypervInvokeMsvmComputerSystemRequestStateChange
                (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_PAUSED);
 
@@ -580,7 +610,7 @@ hypervDomainResume(virDomainPtr domain)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (computerSystem->data->EnabledState !=
+    if (computerSystem->data.common->EnabledState !=
         MSVM_COMPUTERSYSTEM_ENABLEDSTATE_PAUSED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain is not paused"));
@@ -655,6 +685,7 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
@@ -677,8 +708,11 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
                       "ResultClass = Msvm_VirtualSystemSettingData",
                       uuid_string);
 
-    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query,
-                                                  &virtualSystemSettingData) < 0) {
+    wqlSelect.info = Msvm_VirtualSystemSettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &virtualSystemSettingData) < 0) {
         goto cleanup;
     }
 
@@ -686,7 +720,7 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_VirtualSystemSettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
@@ -696,10 +730,13 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
                       "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
                       "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
                       "ResultClass = Msvm_ProcessorSettingData",
-                      virtualSystemSettingData->data->InstanceID);
+                      virtualSystemSettingData->data.common->InstanceID);
 
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
-                                              &processorSettingData) < 0) {
+    wqlSelect.info = Msvm_ProcessorSettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &processorSettingData) < 0) {
         goto cleanup;
     }
 
@@ -707,7 +744,7 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_ProcessorSettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
@@ -717,10 +754,13 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
                       "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
                       "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
                       "ResultClass = Msvm_MemorySettingData",
-                      virtualSystemSettingData->data->InstanceID);
+                      virtualSystemSettingData->data.common->InstanceID);
 
-    if (hypervGetMsvmMemorySettingDataList(priv, &query,
-                                           &memorySettingData) < 0) {
+    wqlSelect.info = Msvm_MemorySettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &memorySettingData) < 0) {
         goto cleanup;
     }
 
@@ -729,15 +769,15 @@ hypervDomainGetInfo(virDomainPtr domain, virDomainInfoPtr info)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_MemorySettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
     /* Fill struct */
     info->state = hypervMsvmComputerSystemEnabledStateToDomainState(computerSystem);
-    info->maxMem = memorySettingData->data->Limit * 1024; /* megabyte to kilobyte */
-    info->memory = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
-    info->nrVirtCpu = processorSettingData->data->VirtualQuantity;
+    info->maxMem = memorySettingData->data.common->Limit * 1024; /* megabyte to kilobyte */
+    info->memory = memorySettingData->data.common->VirtualQuantity * 1024; /* megabyte to kilobyte */
+    info->nrVirtCpu = processorSettingData->data.common->VirtualQuantity;
     info->cpuTime = 0;
 
     result = 0;
@@ -789,6 +829,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     virDomainDefPtr def = NULL;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystem = NULL;
     Msvm_VirtualSystemSettingData *virtualSystemSettingData = NULL;
     Msvm_ProcessorSettingData *processorSettingData = NULL;
@@ -814,8 +855,11 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                       "ResultClass = Msvm_VirtualSystemSettingData",
                       uuid_string);
 
-    if (hypervGetMsvmVirtualSystemSettingDataList(priv, &query,
-                                                  &virtualSystemSettingData) < 0) {
+    wqlSelect.info = Msvm_VirtualSystemSettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &virtualSystemSettingData) < 0) {
         goto cleanup;
     }
 
@@ -823,7 +867,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_VirtualSystemSettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
@@ -833,10 +877,13 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                       "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
                       "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
                       "ResultClass = Msvm_ProcessorSettingData",
-                      virtualSystemSettingData->data->InstanceID);
+                      virtualSystemSettingData->data.common->InstanceID);
 
-    if (hypervGetMsvmProcessorSettingDataList(priv, &query,
-                                              &processorSettingData) < 0) {
+    wqlSelect.info = Msvm_ProcessorSettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &processorSettingData) < 0) {
         goto cleanup;
     }
 
@@ -844,7 +891,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_ProcessorSettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
@@ -854,10 +901,13 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
                       "{Msvm_VirtualSystemSettingData.InstanceID=\"%s\"} "
                       "where AssocClass = Msvm_VirtualSystemSettingDataComponent "
                       "ResultClass = Msvm_MemorySettingData",
-                      virtualSystemSettingData->data->InstanceID);
+                      virtualSystemSettingData->data.common->InstanceID);
 
-    if (hypervGetMsvmMemorySettingDataList(priv, &query,
-                                           &memorySettingData) < 0) {
+    wqlSelect.info = Msvm_MemorySettingData_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &memorySettingData) < 0) {
         goto cleanup;
     }
 
@@ -866,7 +916,7 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not lookup %s for domain %s"),
                        "Msvm_MemorySettingData",
-                       computerSystem->data->ElementName);
+                       computerSystem->data.common->ElementName);
         goto cleanup;
     }
 
@@ -874,34 +924,34 @@ hypervDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     def->virtType = VIR_DOMAIN_VIRT_HYPERV;
 
     if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
-        def->id = computerSystem->data->ProcessID;
+        def->id = computerSystem->data.common->ProcessID;
     } else {
         def->id = -1;
     }
 
-    if (virUUIDParse(computerSystem->data->Name, def->uuid) < 0) {
+    if (virUUIDParse(computerSystem->data.common->Name, def->uuid) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not parse UUID from string '%s'"),
-                       computerSystem->data->Name);
+                       computerSystem->data.common->Name);
         return NULL;
     }
 
-    if (VIR_STRDUP(def->name, computerSystem->data->ElementName) < 0)
+    if (VIR_STRDUP(def->name, computerSystem->data.common->ElementName) < 0)
         goto cleanup;
 
-    if (VIR_STRDUP(def->description, virtualSystemSettingData->data->Notes) < 0)
+    if (VIR_STRDUP(def->description, virtualSystemSettingData->data.common->Notes) < 0)
         goto cleanup;
 
-    virDomainDefSetMemoryTotal(def, memorySettingData->data->Limit * 1024); /* megabyte to kilobyte */
-    def->mem.cur_balloon = memorySettingData->data->VirtualQuantity * 1024; /* megabyte to kilobyte */
+    virDomainDefSetMemoryTotal(def, memorySettingData->data.common->Limit * 1024); /* megabyte to kilobyte */
+    def->mem.cur_balloon = memorySettingData->data.common->VirtualQuantity * 1024; /* megabyte to kilobyte */
 
     if (virDomainDefSetVcpusMax(def,
-                                processorSettingData->data->VirtualQuantity,
+                                processorSettingData->data.common->VirtualQuantity,
                                 NULL) < 0)
         goto cleanup;
 
     if (virDomainDefSetVcpus(def,
-                             processorSettingData->data->VirtualQuantity) < 0)
+                             processorSettingData->data.common->VirtualQuantity) < 0)
         goto cleanup;
 
     def->os.type = VIR_DOMAIN_OSTYPE_HVM;
@@ -929,6 +979,7 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -943,14 +994,17 @@ hypervConnectListDefinedDomains(virConnectPtr conn, char **const names, int maxn
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystemList) < 0) {
         goto cleanup;
     }
 
     for (computerSystem = computerSystemList; computerSystem != NULL;
          computerSystem = computerSystem->next) {
-        if (VIR_STRDUP(names[count], computerSystem->data->ElementName) < 0)
+        if (VIR_STRDUP(names[count], computerSystem->data.common->ElementName) < 0)
             goto cleanup;
 
         ++count;
@@ -982,6 +1036,7 @@ hypervConnectNumOfDefinedDomains(virConnectPtr conn)
     bool success = false;
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     int count = 0;
@@ -992,8 +1047,11 @@ hypervConnectNumOfDefinedDomains(virConnectPtr conn)
     virBufferAddLit(&query, "and ");
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_INACTIVE);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0) {
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystemList) < 0) {
         goto cleanup;
     }
 
@@ -1174,7 +1232,7 @@ hypervDomainHasManagedSaveImage(virDomainPtr domain, unsigned int flags)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    result = computerSystem->data->EnabledState ==
+    result = computerSystem->data.common->EnabledState ==
              MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED ? 1 : 0;
 
  cleanup:
@@ -1197,7 +1255,7 @@ hypervDomainManagedSaveRemove(virDomainPtr domain, unsigned int flags)
     if (hypervMsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
 
-    if (computerSystem->data->EnabledState !=
+    if (computerSystem->data.common->EnabledState !=
         MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("Domain has no managed save image"));
@@ -1222,6 +1280,7 @@ hypervConnectListAllDomains(virConnectPtr conn,
 {
     hypervPrivate *priv = conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ComputerSystem *computerSystemList = NULL;
     Msvm_ComputerSystem *computerSystem = NULL;
     size_t ndoms;
@@ -1269,8 +1328,11 @@ hypervConnectListAllDomains(virConnectPtr conn,
         }
     }
 
-    if (hypervGetMsvmComputerSystemList(priv, &query,
-                                        &computerSystemList) < 0)
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect,
+                        (hypervObject **) &computerSystemList) < 0)
         goto cleanup;
 
     if (domains) {
@@ -1300,7 +1362,7 @@ hypervConnectListAllDomains(virConnectPtr conn,
 
         /* managed save filter */
         if (MATCH(VIR_CONNECT_LIST_DOMAINS_FILTERS_MANAGEDSAVE)) {
-            bool mansave = computerSystem->data->EnabledState ==
+            bool mansave = computerSystem->data.common->EnabledState ==
                            MSVM_COMPUTERSYSTEM_ENABLEDSTATE_SUSPENDED;
 
             if (!((MATCH(VIR_CONNECT_LIST_DOMAINS_MANAGEDSAVE) && mansave) ||

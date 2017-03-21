@@ -418,6 +418,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     int returnCode;
     char *instanceID = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ConcreteJob *concreteJob = NULL;
     bool completed = false;
 
@@ -478,8 +479,10 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
         while (!completed) {
             virBufferAddLit(&query, MSVM_CONCRETEJOB_WQL_SELECT);
             virBufferAsprintf(&query, "where InstanceID = \"%s\"", instanceID);
+            wqlSelect.queryString = virBufferContentAndReset(&query);
+            wqlSelect.info = Msvm_ConcreteJob_WMI_Info;
 
-            if (hypervGetMsvmConcreteJobList(priv, &query, &concreteJob) < 0)
+            if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) &concreteJob) < 0)
                 goto cleanup;
 
             if (concreteJob == NULL) {
@@ -489,7 +492,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                 goto cleanup;
             }
 
-            switch (concreteJob->data->JobState) {
+            switch (concreteJob->data.common->JobState) {
               case MSVM_CONCRETEJOB_JOBSTATE_NEW:
               case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
               case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
@@ -548,7 +551,7 @@ int
 hypervMsvmComputerSystemEnabledStateToDomainState
   (Msvm_ComputerSystem *computerSystem)
 {
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return VIR_DOMAIN_NOSTATE;
 
@@ -588,7 +591,7 @@ hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
     if (in_transition != NULL)
         *in_transition = false;
 
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return false;
 
@@ -632,20 +635,20 @@ hypervMsvmComputerSystemToDomain(virConnectPtr conn,
         return -1;
     }
 
-    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
+    if (virUUIDParse(computerSystem->data.common->Name, uuid) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not parse UUID from string '%s'"),
-                       computerSystem->data->Name);
+                       computerSystem->data.common->Name);
         return -1;
     }
 
-    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid);
+    *domain = virGetDomain(conn, computerSystem->data.common->ElementName, uuid);
 
     if (*domain == NULL)
         return -1;
 
     if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
-        (*domain)->id = computerSystem->data->ProcessID;
+        (*domain)->id = computerSystem->data.common->ProcessID;
     } else {
         (*domain)->id = -1;
     }
@@ -660,6 +663,7 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
     hypervPrivate *priv = domain->conn->privateData;
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
 
     if (computerSystem == NULL || *computerSystem != NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
@@ -673,7 +677,10 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
     virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_VIRTUAL);
     virBufferAsprintf(&query, "and Name = \"%s\"", uuid_string);
 
-    if (hypervGetMsvmComputerSystemList(priv, &query, computerSystem) < 0)
+    wqlSelect.info = Msvm_ComputerSystem_WMI_Info;
+    wqlSelect.queryString = virBufferContentAndReset(&query);
+
+    if (hypervWqlSelect(priv, &wqlSelect, (hypervObject **) computerSystem) < 0)
         return -1;
 
     if (*computerSystem == NULL) {
