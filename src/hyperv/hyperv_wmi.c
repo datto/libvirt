@@ -421,6 +421,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     wqlQuery wqlSelect = WQL_QUERY_INITIALIZER;
     Msvm_ConcreteJob *concreteJob = NULL;
     bool completed = false;
+    const char *resourceUri = MSVM_COMPUTERSYSTEM_V2_RESOURCE_URI;
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -437,11 +438,15 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
         goto cleanup;
     }
 
+
+    if (priv->nsVersion == HYPERV_NS_V1)
+        resourceUri = MSVM_COMPUTERSYSTEM_V1_RESOURCE_URI;
+
     wsmc_add_selectors_from_str(options, selector);
     wsmc_add_prop_from_str(options, properties);
 
     /* Invoke method */
-    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_RESOURCE_URI,
+    response = wsmc_action_invoke(priv->client, resourceUri,
                                   options, "RequestStateChange", NULL);
 
     if (hypervVerifyResponse(priv->client, response, "invocation") < 0)

@@ -588,7 +588,6 @@ hypervDomainSuspend(virDomainPtr domain)
         goto cleanup;
     }
 
-    /* FIXME: v1 only - invokes not ported yet */
     result = hypervInvokeMsvmComputerSystemRequestStateChange
                (domain, MSVM_COMPUTERSYSTEM_REQUESTEDSTATE_PAUSED);
 
