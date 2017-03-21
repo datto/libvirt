@@ -30,9 +30,15 @@
 
 typedef struct _hypervPrivate hypervPrivate;
 
+typedef enum {
+    HYPERV_NS_V1,
+    HYPERV_NS_V2,
+} hypervNamespaceVersion;
+
 struct _hypervPrivate {
     hypervParsedUri *parsedUri;
     WsManClient *client;
+    hypervNamespaceVersion nsVersion;
 };
 
 #endif /* __HYPERV_PRIVATE_H__ */
