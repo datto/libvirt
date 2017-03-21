@@ -29,8 +29,7 @@
 # include "hyperv_wmi_classes.h"
 # include "openwsman.h"
 
-
-
+# define WQL_QUERY_INITIALIZER {NULL, NULL}
 
 int hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
                          const char *detail);
@@ -40,13 +39,36 @@ int hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Object
  */
-
+typedef struct _hypervObject hypervObject;
 struct _hypervObject {
-    XmlSerializerInfo *serializerInfo;
-    XML_TYPE_PTR data;
+    /* Unserialized data from wsman response. The member called "common" has
+     * properties that are the same type and name for all "versions" of given
+     * WMI class. This means that calling code does not have to make any
+     * conditional checks based on which version was returned as long as it
+     * only needs to read common values. The alignment of structs is ensured
+     * by the generator.
+     */
+    union {
+        XML_TYPE_PTR common;
+        XML_TYPE_PTR v1;
+        XML_TYPE_PTR v2;
+    } data;
+    /* The info used to make wsman request */
+    wmiClassInfoPtr info;
+
     hypervObject *next;
 };
 
+
+typedef struct _wqlQuery wqlQuery;
+typedef wqlQuery *wqlQueryPtr;
+struct _wqlQuery {
+    const char *queryString;
+    wmiClassInfoListPtr info;
+};
+
+int hypervWqlSelect(hypervPrivate *priv, const wqlQueryPtr query,
+                    hypervObject **list);
 int hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query,
                       const char *root, XmlSerializerInfo *serializerInfo,
                       const char *resourceUri, const char *className,
@@ -91,7 +113,6 @@ enum _Msvm_ReturnCode {
 const char *hypervReturnCodeToString(int returnCode);
 
 
-
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ComputerSystem
  */
@@ -113,7 +134,5 @@ int hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
                                        Msvm_ComputerSystem **computerSystem);
 
 
-
-# include "hyperv_wmi.generated.h"
 
 #endif /* __HYPERV_WMI_H__ */

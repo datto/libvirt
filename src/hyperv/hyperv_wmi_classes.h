@@ -28,6 +28,14 @@
 # include "hyperv_wmi_classes.generated.typedef"
 
 
+# define ROOT_CIMV2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
+
+# define ROOT_VIRTUALIZATION \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
+
+# define ROOT_VIRTUALIZATION_V2 \
+    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/v2/*"
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ComputerSystem
@@ -86,7 +94,25 @@ enum _Msvm_ConcreteJob_JobState {
     MSVM_CONCRETEJOB_JOBSTATE_SERVICE = 11,
 };
 
+typedef struct _wmiClassInfo wmiClassInfo;
+typedef wmiClassInfo *wmiClassInfoPtr;
+struct _wmiClassInfo {
+    /* The WMI class name */
+    const char *name;
+    /* The URI for wsman enumerate request */
+    const char *rootUri;
+    /* The namespace URI for XML serialization */
+    const char *namespaceUri;
 
+    XmlSerializerInfo *serializerInfo;
+};
+
+typedef struct _wmiClassInfoList wmiClassInfoList;
+typedef wmiClassInfoList *wmiClassInfoListPtr;
+struct _wmiClassInfoList {
+    size_t count;
+    wmiClassInfoPtr *objs;
+};
 
 # include "hyperv_wmi_classes.generated.h"
 
