@@ -55,7 +55,62 @@ hypervFreePrivate(hypervPrivate **priv)
     VIR_FREE(*priv);
 }
 
+static int
+hypervInitConnection(virConnectPtr conn, hypervPrivate *priv,
+                     char *username, char *password)
+{
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+    hypervWqlQuery query = HYPERV_WQL_QUERY_INITIALIZER;
+    hypervObject *computerSystem = NULL;
+    int ret = -1;
 
+    /* Initialize the openwsman connection */
+    priv->client = wsmc_create(conn->uri->server, conn->uri->port, "/wsman",
+                               priv->parsedUri->transport, username, password);
+
+    if (priv->client == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not create openwsman client"));
+        goto cleanup;
+    }
+
+    if (wsmc_transport_init(priv->client, NULL) != 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Could not initialize openwsman transport"));
+        goto cleanup;
+    }
+
+    /* FIXME: Currently only basic authentication is supported  */
+    wsman_transport_set_auth_method(priv->client, "basic");
+
+    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+    virBufferAddLit(&buf, "WHERE ");
+    virBufferAddLit(&buf, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
+
+    query.query = virBufferContentAndReset(&buf);
+    query.info = Msvm_ComputerSystem_WmiInfo;
+
+    /* try query using V2 namespace (for Hyperv 2012+) */
+    priv->wmiVersion = HYPERV_WMI_VERSION_V2;
+
+    if (hypervEnumAndPull(priv, &query, &computerSystem) < 0) {
+        /* fall back to V1 namespace (for Hyper-v 2008) */
+        priv->wmiVersion = HYPERV_WMI_VERSION_V1;
+
+        if (hypervEnumAndPull(priv, &query, &computerSystem) < 0) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s is not a Hyper-V server"), conn->uri->server);
+            goto cleanup;
+        }
+    }
+
+    ret = 0;
+
+ cleanup:
+    hypervFreeObject(priv, computerSystem);
+
+    return ret;
+}
 
 static virDrvOpenStatus
 hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
@@ -67,8 +122,6 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     hypervPrivate *priv = NULL;
     char *username = NULL;
     char *password = NULL;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem *computerSystem = NULL;
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
@@ -147,41 +200,9 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    /* Initialize the openwsman connection */
-    priv->client = wsmc_create(conn->uri->server, conn->uri->port, "/wsman",
-                               priv->parsedUri->transport, username, password);
 
-    if (priv->client == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not create openwsman client"));
+    if (hypervInitConnection(conn, priv, username, password) < 0)
         goto cleanup;
-    }
-
-    if (wsmc_transport_init(priv->client, NULL) != 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not initialize openwsman transport"));
-        goto cleanup;
-    }
-
-    /* FIXME: Currently only basic authentication is supported  */
-    wsman_transport_set_auth_method(priv->client, "basic");
-
-    /* Check if the connection can be established and if the server has the
-     * Hyper-V role installed. If the call to hypervGetMsvmComputerSystemList
-     * succeeds than the connection has been established. If the returned list
-     * is empty than the server isn't a Hyper-V server. */
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_SELECT);
-    virBufferAddLit(&query, "where ");
-    virBufferAddLit(&query, MSVM_COMPUTERSYSTEM_WQL_PHYSICAL);
-
-    if (hypervGetMsvmComputerSystemList(priv, &query, &computerSystem) < 0)
-        goto cleanup;
-
-    if (computerSystem == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("%s is not a Hyper-V server"), conn->uri->server);
-        goto cleanup;
-    }
 
     conn->privateData = priv;
     priv = NULL;
@@ -191,7 +212,6 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     hypervFreePrivate(&priv);
     VIR_FREE(username);
     VIR_FREE(password);
-    hypervFreeObject(priv, (hypervObject *)computerSystem);
 
     return result;
 }
