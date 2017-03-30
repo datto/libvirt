@@ -36,15 +36,13 @@
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
-#define ROOT_CIMV2 \
+# define ROOT_CIMV2 \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
 
-#define ROOT_VIRTUALIZATION \
+# define ROOT_VIRTUALIZATION \
     "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
-
-
 
 int
 hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
