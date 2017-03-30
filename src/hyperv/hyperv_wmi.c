@@ -437,6 +437,8 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ConcreteJob *concreteJob = NULL;
     bool completed = false;
+    const char *resourceUri = MSVM_COMPUTERSYSTEM_V2_RESOURCE_URI;
+
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -444,6 +446,9 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                     uuid_string) < 0 ||
         virAsprintf(&properties, "RequestedState=%d", requestedState) < 0)
         goto cleanup;
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1)
+        resourceUri = MSVM_COMPUTERSYSTEM_V2_RESOURCE_URI;
 
     options = wsmc_options_init();
 
@@ -457,7 +462,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     wsmc_add_prop_from_str(options, properties);
 
     /* Invoke method */
-    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_RESOURCE_URI,
+    response = wsmc_action_invoke(priv->client, resourceUri,
                                   options, "RequestStateChange", NULL);
 
     if (hypervVerifyResponse(priv->client, response, "invocation") < 0)
@@ -506,7 +511,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                 goto cleanup;
             }
 
-            switch (concreteJob->data->JobState) {
+            switch (concreteJob->data.common->JobState) {
               case MSVM_CONCRETEJOB_JOBSTATE_NEW:
               case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
               case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
@@ -565,7 +570,7 @@ int
 hypervMsvmComputerSystemEnabledStateToDomainState
   (Msvm_ComputerSystem *computerSystem)
 {
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return VIR_DOMAIN_NOSTATE;
 
@@ -605,7 +610,7 @@ hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
     if (in_transition != NULL)
         *in_transition = false;
 
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return false;
 
@@ -649,20 +654,20 @@ hypervMsvmComputerSystemToDomain(virConnectPtr conn,
         return -1;
     }
 
-    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
+    if (virUUIDParse(computerSystem->data.common->Name, uuid) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not parse UUID from string '%s'"),
-                       computerSystem->data->Name);
+                       computerSystem->data.common->Name);
         return -1;
     }
 
-    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid);
+    *domain = virGetDomain(conn, computerSystem->data.common->ElementName, uuid);
 
     if (*domain == NULL)
         return -1;
 
     if (hypervIsMsvmComputerSystemActive(computerSystem, NULL)) {
-        (*domain)->id = computerSystem->data->ProcessID;
+        (*domain)->id = computerSystem->data.common->ProcessID;
     } else {
         (*domain)->id = -1;
     }
