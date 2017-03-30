@@ -32,7 +32,6 @@
 
 # define HYPERV_WQL_QUERY_INITIALIZER {NULL, NULL}
 
-typedef struct _hypervObject hypervObject;
 
 int hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
                          const char *detail);
@@ -42,8 +41,8 @@ int hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Object
  */
-typedef struct _hypervObjectUnified hypervObjectUnified;
-struct _hypervObjectUnified {
+typedef struct _hypervObject hypervObject;
+struct _hypervObject {
     /* Unserialized data from wsman response. The member called "common" has
      * properties that are the same type and name for all "versions" of given
      * WMI class. This means that calling code does not have to make any
@@ -59,7 +58,7 @@ struct _hypervObjectUnified {
     /* The info used to make wsman request */
     hypervWmiClassInfoPtr info;
 
-    hypervObjectUnified *next;
+    hypervObject *next;
 };
 
 typedef struct _hypervWqlQuery hypervWqlQuery;
@@ -69,15 +68,7 @@ struct _hypervWqlQuery {
     hypervWmiClassInfoListPtr info;
 };
 
-struct _hypervObject {
-    XmlSerializerInfo *serializerInfo;
-    XML_TYPE_PTR data;
-    hypervObject *next;
-};
-
-int hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query,
-                      const char *root, XmlSerializerInfo *serializerInfo,
-                      const char *resourceUri, const char *className,
+int hypervEnumAndPull(hypervPrivate *priv, hypervWqlQueryPtr wqlQuery,
                       hypervObject **list);
 
 void hypervFreeObject(hypervPrivate *priv, hypervObject *object);
