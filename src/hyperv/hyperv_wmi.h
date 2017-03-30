@@ -109,7 +109,29 @@ enum _Msvm_ReturnCode {
 
 const char *hypervReturnCodeToString(int returnCode);
 
+/* Generic "Get WMI class list" */
+int hypervGetMsvmComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                    Msvm_ComputerSystem **list);
 
+int hypervGetMsvmConcreteJobList(hypervPrivate *priv, virBufferPtr query,
+                                 Msvm_ConcreteJob **list);
+
+int hypervGetWin32ComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                     Win32_ComputerSystem **list);
+
+int hypervGetWin32ProcessorList(hypervPrivate *priv, virBufferPtr query,
+                                    Win32_Processor **list);
+
+int hypervGetMsvmVirtualSystemSettingDataList(hypervPrivate *priv,
+                                              virBufferPtr query,
+                                              Msvm_VirtualSystemSettingData **list);
+
+int hypervGetMsvmProcessorSettingDataList(hypervPrivate *priv,
+                                          virBufferPtr query,
+                                          Msvm_ProcessorSettingData **list);
+
+int hypervGetMsvmMemorySettingDataList(hypervPrivate *priv, virBufferPtr query,
+                                       Msvm_MemorySettingData **list);
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * Msvm_ComputerSystem
@@ -132,7 +154,5 @@ int hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
                                        Msvm_ComputerSystem **computerSystem);
 
 
-
-# include "hyperv_wmi.generated.h"
 
 #endif /* __HYPERV_WMI_H__ */

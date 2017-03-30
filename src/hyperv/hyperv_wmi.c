@@ -36,12 +36,6 @@
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
-# define ROOT_CIMV2 \
-    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
-
-# define ROOT_VIRTUALIZATION \
-    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
-
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
 static int
@@ -77,6 +71,18 @@ hypervGetWmiClassInfo(hypervPrivate *priv, hypervWmiClassInfoListPtr list,
                    version);
 
     return -1;
+}
+
+static int
+hypervGetWmiClassList(hypervPrivate *priv, hypervWmiClassInfoListPtr wmiInfo,
+                      virBufferPtr query, hypervObject **wmiClass)
+{
+    hypervWqlQuery wqlQuery = HYPERV_WQL_QUERY_INITIALIZER;
+
+    wqlQuery.info = wmiInfo;
+    wqlQuery.query = virBufferContentAndReset(query);
+
+    return hypervEnumAndPull(priv, &wqlQuery, wmiClass);
 }
 
 int
@@ -697,5 +703,66 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
 }
 
 
+int
+hypervGetMsvmComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                Msvm_ComputerSystem **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ComputerSystem_WmiInfo, query,
+                                 (hypervObject **) list);
+}
 
-#include "hyperv_wmi.generated.c"
+
+int
+hypervGetMsvmConcreteJobList(hypervPrivate *priv, virBufferPtr query,
+                             Msvm_ConcreteJob **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ConcreteJob_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetWin32ComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                 Win32_ComputerSystem **list)
+{
+    return hypervGetWmiClassList(priv, Win32_ComputerSystem_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetWin32ProcessorList(hypervPrivate *priv, virBufferPtr query,
+                            Win32_Processor **list)
+{
+    return hypervGetWmiClassList(priv, Win32_Processor_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmVirtualSystemSettingDataList(hypervPrivate *priv,
+                                          virBufferPtr query,
+                                          Msvm_VirtualSystemSettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_VirtualSystemSettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmProcessorSettingDataList(hypervPrivate *priv,
+                                      virBufferPtr query,
+                                      Msvm_ProcessorSettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ProcessorSettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmMemorySettingDataList(hypervPrivate *priv, virBufferPtr query,
+                                   Msvm_MemorySettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_MemorySettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
