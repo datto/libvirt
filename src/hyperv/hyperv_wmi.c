@@ -44,6 +44,41 @@
 
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
+static int
+hypervGetWmiClassInfo(hypervPrivate *priv, hypervWmiClassInfoListPtr list,
+                      hypervWmiClassInfoPtr *info)
+{
+    const char *version = "v2";
+    size_t i;
+
+    if (list->count == 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("The WMI class info list is empty"));
+        return -1;
+    }
+
+    if (list->count == 1) {
+        *info = list->objs[0];
+        return 0;
+    }
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1)
+        version = "v1";
+
+    for (i = 0; i < list->count; i++) {
+       if (STRCASEEQ(list->objs[i]->version, version)) {
+           *info = list->objs[i];
+           return 0;
+       }
+    }
+
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("Could not match WMI class info for version %s"),
+                   version);
+
+    return -1;
+}
+
 int
 hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
                      const char *detail)
