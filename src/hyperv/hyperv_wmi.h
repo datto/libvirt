@@ -30,6 +30,7 @@
 # include "openwsman.h"
 
 
+# define HYPERV_WQL_QUERY_INITIALIZER {NULL, NULL}
 
 typedef struct _hypervObject hypervObject;
 
@@ -59,6 +60,13 @@ struct _hypervObjectUnified {
     hypervWmiClassInfoPtr info;
 
     hypervObjectUnified *next;
+};
+
+typedef struct _hypervWqlQuery hypervWqlQuery;
+typedef hypervWqlQuery *hypervWqlQueryPtr;
+struct _hypervWqlQuery {
+    const char *query;
+    hypervWmiClassInfoListPtr info;
 };
 
 struct _hypervObject {
