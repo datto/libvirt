@@ -3111,16 +3111,10 @@ virQEMUCapsCPUFilterFeatures(const char *name,
  */
 static int
 virQEMUCapsInitCPUModelS390(virQEMUCapsPtr qemuCaps,
-                            virDomainVirtType type,
+                            qemuMonitorCPUModelInfoPtr modelInfo,
                             virCPUDefPtr cpu)
 {
-    qemuMonitorCPUModelInfoPtr modelInfo;
     size_t i;
-
-    if (type == VIR_DOMAIN_VIRT_KVM)
-        modelInfo = qemuCaps->kvmCPUModelInfo;
-    else
-        modelInfo = qemuCaps->tcgCPUModelInfo;
 
     if (!modelInfo) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -3163,9 +3157,9 @@ virQEMUCapsInitCPUModelS390(virQEMUCapsPtr qemuCaps,
 static int
 virQEMUCapsInitCPUModelX86(virQEMUCapsPtr qemuCaps,
                            virDomainVirtType type,
+                           qemuMonitorCPUModelInfoPtr model,
                            virCPUDefPtr cpu)
 {
-    qemuMonitorCPUModelInfoPtr model;
     virCPUDataPtr data = NULL;
     unsigned long long sigFamily = 0;
     unsigned long long sigModel = 0;
@@ -3173,11 +3167,6 @@ virQEMUCapsInitCPUModelX86(virQEMUCapsPtr qemuCaps,
     char **models = NULL;
     int ret = -1;
     size_t i;
-
-    if (type == VIR_DOMAIN_VIRT_KVM)
-        model = qemuCaps->kvmCPUModelInfo;
-    else
-        model = qemuCaps->tcgCPUModelInfo;
 
     if (!model)
         return 1;
@@ -3239,12 +3228,18 @@ virQEMUCapsInitCPUModel(virQEMUCapsPtr qemuCaps,
                         virDomainVirtType type,
                         virCPUDefPtr cpu)
 {
+    qemuMonitorCPUModelInfoPtr model;
     int ret = 1;
 
+    if (type == VIR_DOMAIN_VIRT_KVM)
+        model = qemuCaps->kvmCPUModelInfo;
+    else
+        model = qemuCaps->tcgCPUModelInfo;
+
     if (ARCH_IS_S390(qemuCaps->arch))
-        ret = virQEMUCapsInitCPUModelS390(qemuCaps, type, cpu);
+        ret = virQEMUCapsInitCPUModelS390(qemuCaps, model, cpu);
     else if (ARCH_IS_X86(qemuCaps->arch))
-        ret = virQEMUCapsInitCPUModelX86(qemuCaps, type, cpu);
+        ret = virQEMUCapsInitCPUModelX86(qemuCaps, type, model, cpu);
 
     if (ret == 0)
         cpu->fallback = VIR_CPU_FALLBACK_FORBID;
