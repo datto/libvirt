@@ -2576,7 +2576,7 @@ hyperv2ConnectGetType(virConnectPtr conn ATTRIBUTE_UNUSED)
 int
 hyperv2ConnectGetVersion(virConnectPtr conn, unsigned long *version)
 {
-    int result = -1;
+    int result = -1, i = 0;
     hypervPrivate *priv = conn->privateData;
     CIM_DataFile *datafile = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
@@ -2593,13 +2593,20 @@ hyperv2ConnectGetVersion(virConnectPtr conn, unsigned long *version)
         goto cleanup;
     }
 
-    /* delete release number and last digit of build number */
-    p = strrchr(datafile->data->Version, '.');
-    if (p == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not parse version number from '%s'"),
-                datafile->data->Version);
-        goto cleanup;
+    /*
+     * Pull out major and minor from version string
+     * Altered from the other implementation because of Windows 10
+     */
+    p = datafile->data->Version;
+    for (i = 0; i < 2; i++) {
+        p = strchr(p, '.');
+        if (p == NULL) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                    _("Could not parse version number from '%s'"),
+                    datafile->data->Version);
+            goto cleanup;
+        }
+        p++;
     }
     p--;
     *p = '\0';
