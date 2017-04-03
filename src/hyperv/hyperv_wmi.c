@@ -36,15 +36,56 @@
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
-#define ROOT_CIMV2 \
-    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/cimv2/*"
-
-#define ROOT_VIRTUALIZATION \
-    "http://schemas.microsoft.com/wbem/wsman/1/wmi/root/virtualization/*"
-
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
 
+static int
+hypervGetWmiClassInfo(hypervPrivate *priv, hypervWmiClassInfoListPtr list,
+                      hypervWmiClassInfoPtr *info)
+{
+    const char *version = "v2";
+    size_t i;
+
+    if (list->count == 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("The WMI class info list is empty"));
+        return -1;
+    }
+
+    /* if there's just one WMI class and isn't versioned, assume "shared" */
+    if (list->count == 1 && list->objs[0]->version == NULL) {
+        *info = list->objs[0];
+        return 0;
+    }
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1)
+        version = "v1";
+
+    for (i = 0; i < list->count; i++) {
+       if (STRCASEEQ(list->objs[i]->version, version)) {
+           *info = list->objs[i];
+           return 0;
+       }
+    }
+
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("Could not match WMI class info for version %s"),
+                   version);
+
+    return -1;
+}
+
+static int
+hypervGetWmiClassList(hypervPrivate *priv, hypervWmiClassInfoListPtr wmiInfo,
+                      virBufferPtr query, hypervObject **wmiClass)
+{
+    hypervWqlQuery wqlQuery = HYPERV_WQL_QUERY_INITIALIZER;
+
+    wqlQuery.info = wmiInfo;
+    wqlQuery.query = virBufferContentAndReset(query);
+
+    return hypervEnumAndPull(priv, &wqlQuery, wmiClass);
+}
 
 int
 hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
@@ -108,14 +149,13 @@ hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
 
 /* This function guarantees that query is freed, even on failure */
 int
-hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
-                  XmlSerializerInfo *serializerInfo, const char *resourceUri,
-                  const char *className, hypervObject **list)
+hypervEnumAndPull(hypervPrivate *priv, hypervWqlQueryPtr wqlQuery,
+                  hypervObject **list)
 {
     int result = -1;
     WsSerializerContextH serializerContext;
     client_opt_t *options = NULL;
-    char *query_string = NULL;
+    hypervWmiClassInfoPtr wmiInfo = NULL;
     filter_t *filter = NULL;
     WsXmlDocH response = NULL;
     char *enumContext = NULL;
@@ -125,17 +165,13 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
     XML_TYPE_PTR data = NULL;
     hypervObject *object;
 
-    if (virBufferCheckError(query) < 0) {
-        virBufferFreeAndReset(query);
-        return -1;
-    }
-    query_string = virBufferContentAndReset(query);
-
     if (list == NULL || *list != NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid argument"));
-        VIR_FREE(query_string);
         return -1;
     }
+
+    if (hypervGetWmiClassInfo(priv, wqlQuery->info, &wmiInfo) < 0)
+        return -1;
 
     serializerContext = wsmc_get_serialization_context(priv->client);
 
@@ -147,7 +183,7 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
         goto cleanup;
     }
 
-    filter = filter_create_simple(WSM_WQL_FILTER_DIALECT, query_string);
+    filter = filter_create_simple(WSM_WQL_FILTER_DIALECT, wqlQuery->query);
 
     if (filter == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -155,7 +191,8 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
         goto cleanup;
     }
 
-    response = wsmc_action_enumerate(priv->client, root, options, filter);
+    response = wsmc_action_enumerate(priv->client, wmiInfo->rootUri, options,
+                                     filter);
 
     if (hypervVerifyResponse(priv->client, response, "enumeration") < 0)
         goto cleanup;
@@ -166,7 +203,7 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
     response = NULL;
 
     while (enumContext != NULL && *enumContext != '\0') {
-        response = wsmc_action_pull(priv->client, resourceUri, options,
+        response = wsmc_action_pull(priv->client, wmiInfo->resourceUri, options,
                                     filter, enumContext);
 
         if (hypervVerifyResponse(priv->client, response, "pull") < 0)
@@ -196,11 +233,12 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
             goto cleanup;
         }
 
-        if (ws_xml_get_child(node, 0, resourceUri, className) == NULL)
+        if (ws_xml_get_child(node, 0, wmiInfo->resourceUri,
+                             wmiInfo->name) == NULL)
             break;
 
-        data = ws_deserialize(serializerContext, node, serializerInfo,
-                              className, resourceUri, NULL, 0, 0);
+        data = ws_deserialize(serializerContext, node, wmiInfo->serializerInfo,
+                              wmiInfo->name, wmiInfo->resourceUri, NULL, 0, 0);
 
         if (data == NULL) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -211,8 +249,8 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
         if (VIR_ALLOC(object) < 0)
             goto cleanup;
 
-        object->serializerInfo = serializerInfo;
-        object->data = data;
+        object->info = wmiInfo;
+        object->data.common = data;
 
         data = NULL;
 
@@ -248,13 +286,12 @@ hypervEnumAndPull(hypervPrivate *priv, virBufferPtr query, const char *root,
         /* FIXME: ws_serializer_free_mem is broken in openwsman <= 2.2.6,
          *        see hypervFreeObject for a detailed explanation. */
         if (ws_serializer_free_mem(serializerContext, data,
-                                   serializerInfo) < 0) {
+                                   wmiInfo->serializerInfo) < 0) {
             VIR_ERROR(_("Could not free deserialized data"));
         }
 #endif
     }
 
-    VIR_FREE(query_string);
     ws_xml_destroy_doc(response);
     VIR_FREE(enumContext);
     hypervFreeObject(priv, head);
@@ -402,6 +439,8 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ConcreteJob *concreteJob = NULL;
     bool completed = false;
+    const char *resourceUri = MSVM_COMPUTERSYSTEM_V2_RESOURCE_URI;
+
 
     virUUIDFormat(domain->uuid, uuid_string);
 
@@ -409,6 +448,9 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                     uuid_string) < 0 ||
         virAsprintf(&properties, "RequestedState=%d", requestedState) < 0)
         goto cleanup;
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1)
+        resourceUri = MSVM_COMPUTERSYSTEM_V2_RESOURCE_URI;
 
     options = wsmc_options_init();
 
@@ -422,7 +464,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
     wsmc_add_prop_from_str(options, properties);
 
     /* Invoke method */
-    response = wsmc_action_invoke(priv->client, MSVM_COMPUTERSYSTEM_RESOURCE_URI,
+    response = wsmc_action_invoke(priv->client, resourceUri,
                                   options, "RequestStateChange", NULL);
 
     if (hypervVerifyResponse(priv->client, response, "invocation") < 0)
@@ -471,7 +513,7 @@ hypervInvokeMsvmComputerSystemRequestStateChange(virDomainPtr domain,
                 goto cleanup;
             }
 
-            switch (concreteJob->data->JobState) {
+            switch (concreteJob->data.common->JobState) {
               case MSVM_CONCRETEJOB_JOBSTATE_NEW:
               case MSVM_CONCRETEJOB_JOBSTATE_STARTING:
               case MSVM_CONCRETEJOB_JOBSTATE_RUNNING:
@@ -530,7 +572,7 @@ int
 hypervMsvmComputerSystemEnabledStateToDomainState
   (Msvm_ComputerSystem *computerSystem)
 {
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return VIR_DOMAIN_NOSTATE;
 
@@ -570,7 +612,7 @@ hypervIsMsvmComputerSystemActive(Msvm_ComputerSystem *computerSystem,
     if (in_transition != NULL)
         *in_transition = false;
 
-    switch (computerSystem->data->EnabledState) {
+    switch (computerSystem->data.common->EnabledState) {
       case MSVM_COMPUTERSYSTEM_ENABLEDSTATE_UNKNOWN:
         return false;
 
@@ -615,17 +657,17 @@ hypervMsvmComputerSystemToDomain(virConnectPtr conn,
         return -1;
     }
 
-    if (virUUIDParse(computerSystem->data->Name, uuid) < 0) {
+    if (virUUIDParse(computerSystem->data.common->Name, uuid) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Could not parse UUID from string '%s'"),
-                       computerSystem->data->Name);
+                       computerSystem->data.common->Name);
         return -1;
     }
 
     if (hypervIsMsvmComputerSystemActive(computerSystem, NULL))
-        id = computerSystem->data->ProcessID;
+        id = computerSystem->data.common->ProcessID;
 
-    *domain = virGetDomain(conn, computerSystem->data->ElementName, uuid, id);
+    *domain = virGetDomain(conn, computerSystem->data.common->ElementName, uuid, id);
 
     return *domain ? 0 : -1;
 }
@@ -663,5 +705,66 @@ hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
 }
 
 
+int
+hypervGetMsvmComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                Msvm_ComputerSystem **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ComputerSystem_WmiInfo, query,
+                                 (hypervObject **) list);
+}
 
-#include "hyperv_wmi.generated.c"
+
+int
+hypervGetMsvmConcreteJobList(hypervPrivate *priv, virBufferPtr query,
+                             Msvm_ConcreteJob **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ConcreteJob_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetWin32ComputerSystemList(hypervPrivate *priv, virBufferPtr query,
+                                 Win32_ComputerSystem **list)
+{
+    return hypervGetWmiClassList(priv, Win32_ComputerSystem_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetWin32ProcessorList(hypervPrivate *priv, virBufferPtr query,
+                            Win32_Processor **list)
+{
+    return hypervGetWmiClassList(priv, Win32_Processor_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmVirtualSystemSettingDataList(hypervPrivate *priv,
+                                          virBufferPtr query,
+                                          Msvm_VirtualSystemSettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_VirtualSystemSettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmProcessorSettingDataList(hypervPrivate *priv,
+                                      virBufferPtr query,
+                                      Msvm_ProcessorSettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_ProcessorSettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
+
+int
+hypervGetMsvmMemorySettingDataList(hypervPrivate *priv, virBufferPtr query,
+                                   Msvm_MemorySettingData **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_MemorySettingData_WmiInfo, query,
+                                 (hypervObject **) list);
+}
