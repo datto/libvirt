@@ -2419,6 +2419,18 @@ virQEMUCapsGetHostModel(virQEMUCapsPtr qemuCaps,
 }
 
 
+static void
+virQEMUCapsSetHostModel(virQEMUCapsPtr qemuCaps,
+                        virDomainVirtType type,
+                        virCPUDefPtr cpu)
+{
+    if (type == VIR_DOMAIN_VIRT_KVM)
+        qemuCaps->kvmCPUModel = cpu;
+    else
+        qemuCaps->tcgCPUModel = cpu;
+}
+
+
 bool
 virQEMUCapsIsCPUModeSupported(virQEMUCapsPtr qemuCaps,
                               virCapsPtr caps,
@@ -3295,10 +3307,7 @@ virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
             goto error;
     }
 
-    if (type == VIR_DOMAIN_VIRT_KVM)
-        qemuCaps->kvmCPUModel = cpu;
-    else
-        qemuCaps->tcgCPUModel = cpu;
+    virQEMUCapsSetHostModel(qemuCaps, type, cpu);
 
  cleanup:
     virCPUDefFree(hostCPU);
