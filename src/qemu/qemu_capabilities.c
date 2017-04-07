@@ -2106,6 +2106,21 @@ virQEMUCapsHostCPUDataCopy(virQEMUCapsPtr dst,
 }
 
 
+static void
+virQEMUCapsHostCPUDataClear(virQEMUCapsPtr qemuCaps)
+{
+    qemuMonitorCPUModelInfoFree(qemuCaps->kvmCPUModelInfo);
+    qemuMonitorCPUModelInfoFree(qemuCaps->tcgCPUModelInfo);
+    qemuCaps->kvmCPUModelInfo = NULL;
+    qemuCaps->tcgCPUModelInfo = NULL;
+
+    virCPUDefFree(qemuCaps->kvmCPUModel);
+    virCPUDefFree(qemuCaps->tcgCPUModel);
+    qemuCaps->kvmCPUModel = NULL;
+    qemuCaps->tcgCPUModel = NULL;
+}
+
+
 virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps)
 {
     virQEMUCapsPtr ret = virQEMUCapsNew();
@@ -2192,10 +2207,7 @@ void virQEMUCapsDispose(void *obj)
 
     VIR_FREE(qemuCaps->gicCapabilities);
 
-    qemuMonitorCPUModelInfoFree(qemuCaps->kvmCPUModelInfo);
-    qemuMonitorCPUModelInfoFree(qemuCaps->tcgCPUModelInfo);
-    virCPUDefFree(qemuCaps->kvmCPUModel);
-    virCPUDefFree(qemuCaps->tcgCPUModel);
+    virQEMUCapsHostCPUDataClear(qemuCaps);
 }
 
 void
@@ -4068,15 +4080,7 @@ virQEMUCapsReset(virQEMUCapsPtr qemuCaps)
     VIR_FREE(qemuCaps->gicCapabilities);
     qemuCaps->ngicCapabilities = 0;
 
-    qemuMonitorCPUModelInfoFree(qemuCaps->kvmCPUModelInfo);
-    qemuMonitorCPUModelInfoFree(qemuCaps->tcgCPUModelInfo);
-    qemuCaps->kvmCPUModelInfo = NULL;
-    qemuCaps->tcgCPUModelInfo = NULL;
-
-    virCPUDefFree(qemuCaps->kvmCPUModel);
-    virCPUDefFree(qemuCaps->tcgCPUModel);
-    qemuCaps->kvmCPUModel = NULL;
-    qemuCaps->tcgCPUModel = NULL;
+    virQEMUCapsHostCPUDataClear(qemuCaps);
 }
 
 
