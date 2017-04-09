@@ -1188,9 +1188,11 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
     int scsi_idx = 0;
     int ide_idx = -1;
     char **conn = NULL;
-    char **matches = NULL;
     char **hostResource = NULL;
-    ssize_t found_lun = 0;
+    char *hostEscaped = NULL;
+    char *driveNumberStr = NULL;
+    Msvm_DiskDrive_V1 *diskdrive = NULL;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
     int addr = -1, i = 0, ctrlr_idx = -1;
     Msvm_ResourceAllocationSettingData_V1 *ideControllers[HYPERV1_MAX_IDE_CONTROLLERS];
     Msvm_ResourceAllocationSettingData_V1 *scsiControllers[HYPERV1_MAX_SCSI_CONTROLLERS];
@@ -1308,22 +1310,23 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                 }
 
                 hostResource = entry->data->HostResource.data;
+                hostEscaped = virStringReplace(*hostResource,
+                        "\\", "\\\\");
+                hostEscaped = virStringReplace(hostEscaped, "\"", "\\\"");
 
-                /*
-                 * Use regex to lift DeviceID of backing Msvm_DiskDrive_V1
-                 * from hostResource
-                 */
-                found_lun = virStringSearch(*hostResource,
-                        "(Microsoft:[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})\\\\\\\\[[:alnum:]]+",
-                        2, &matches);
+                virBufferAsprintf(&query,
+                        "select * from Msvm_DiskDrive where "
+                        "__PATH=\"%s\"", hostEscaped);
 
-                if (found_lun > 0) {
-                    ignore_value(virDomainDiskSetSource(disk, matches[0]));
-                } else {
+                if (hyperv1GetMsvmDiskDriveList(priv, &query, &diskdrive) < 0
+                        || diskdrive == NULL) {
                     virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                            _("Could not find SCSI drive address"));
+                            _("Could not find Msvm_DiskDrive object"));
                     goto cleanup;
                 }
+
+                driveNumberStr = virNumToStr(diskdrive->data->DriveNumber);
+                ignore_value(virDomainDiskSetSource(disk, driveNumberStr));
 
                 addr = atoi(entry->data->Address);
                 if (addr < 0)
@@ -1378,7 +1381,10 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
 cleanup:
     if (result != 0 && disk)
             virDomainDiskDefFree(disk);
-    virStringListFree(matches);
+    hypervFreeObject(priv, (hypervObject *) diskdrive);
+    VIR_FREE(hostEscaped);
+    VIR_FREE(driveNumberStr);
+    virBufferFreeAndReset(&query);
 
     return result;
 }
@@ -2039,13 +2045,19 @@ hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
     char *hostResource = NULL;
     char *controller__PATH = NULL;
     char *instance_temp = NULL;
+    char *diskdef_instance = NULL;
+    char *builtPath = NULL;
+    char **matches = NULL;
+    ssize_t found = 0;
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
     virBuffer query = VIR_BUFFER_INITIALIZER;
+    virBuffer rasdQuery = VIR_BUFFER_INITIALIZER;
     invokeXmlParam *params = NULL;
     properties_t *props = NULL;
     eprParam ComputerSystem_REF;
     embeddedParam embeddedparam;
+    Msvm_ResourceAllocationSettingData_V1 *diskdefault = NULL;
 
     if (strstr(disk->src->path, "NODRIVE"))
         goto success; /* Hyper-V doesn't let you define LUNs with no connection */
@@ -2057,12 +2069,41 @@ hyperv1DomainAttachPhysicalDisk(virDomainPtr domain, virDomainDiskDefPtr disk,
             disk->info.addr.drive.controller, disk->bus);
 
     /* prepare HostResource */
+
+    /* get Msvm_diskDrive root device ID */
+    virBufferAsprintf(&rasdQuery,
+            "SELECT * FROM Msvm_ResourceAllocationSettingData "
+            "WHERE ResourceSubType = 'Microsoft Physical Disk Drive' "
+            "AND InstanceID LIKE '%%Default%%'");
+
+    if (hyperv1GetMsvmResourceAllocationSettingDataList(priv, &rasdQuery,
+                &diskdefault) < 0 || diskdefault == NULL) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not retrieve default Msvm_DiskDrive object"));
+        goto cleanup;
+    }
+
+    diskdef_instance = diskdefault->data->InstanceID;
+    found = virStringSearch(diskdef_instance,
+            "([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})",
+            1, &matches);
+
+    if (found < 1) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                _("Could not get Msvm_DiskDrive default InstanceID"));
+        goto cleanup;
+    }
+
+    if (virAsprintf(&builtPath, "Microsoft:%s\\\\%s", matches[0],
+                disk->src->path) < 0)
+        goto cleanup;
+
     /* TODO: fix this so it can access LUNs on different hosts */
     virBufferAsprintf(&query, "\\\\%s\\root\\virtualization:"
             "Msvm_DiskDrive.CreationClassName=\"Msvm_DiskDrive\","
             "DeviceID=\"%s\",SystemCreationClassName=\"Msvm_ComputerSystem\","
             "SystemName=\"%s\"",
-            hostname, disk->src->path, hostname);
+            hostname, builtPath, hostname);
     hostResource = virBufferContentAndReset(&query);
 
     /* prepare controller's path */
@@ -2122,6 +2163,10 @@ cleanup:
     VIR_FREE(hostResource);
     VIR_FREE(instance_temp);
     virBufferFreeAndReset(&query);
+    virBufferFreeAndReset(&rasdQuery);
+    VIR_FREE(builtPath);
+    virStringListFree(matches);
+    hypervFreeObject(priv, (hypervObject *) diskdefault);
     return result;
 }
 
