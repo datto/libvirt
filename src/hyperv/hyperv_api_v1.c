@@ -1298,6 +1298,15 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                         "Microsoft Physical Disk Drive")) {
                 /* clear some vars */
                 disk = NULL;
+                diskdrive = NULL;
+
+                hostResource = entry->data->HostResource.data;
+                if (strstr(*hostResource, "NODRIVE")) {
+                    /* Hyper-V doesn't let you define LUNs with no connection */
+                    VIR_DEBUG("Skipping empty LUN '%s'", *hostResource);
+                    entry = entry->next;
+                    continue;
+                }
 
                 if (hyperv1GetDeviceParentRasdFromDeviceId(entry->data->Parent,
                             rasd, &disk_ctrlr) < 0)
@@ -1309,7 +1318,6 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                     goto cleanup;
                 }
 
-                hostResource = entry->data->HostResource.data;
                 hostEscaped = virStringReplace(*hostResource,
                         "\\", "\\\\");
                 hostEscaped = virStringReplace(hostEscaped, "\"", "\\\"");
@@ -1365,7 +1373,7 @@ hyperv1DomainDefParseStorage(virDomainPtr domain, virDomainDefPtr def,
                 disk->info.addr.drive.bus = 0;
                 disk->info.addr.drive.target = 0;
                 virDomainDiskSetType(disk, VIR_STORAGE_TYPE_BLOCK);
-                disk->device = VIR_DOMAIN_DISK_DEVICE_LUN;
+                disk->device = VIR_DOMAIN_DISK_DEVICE_DISK;
 
                 disk->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE;
 
@@ -2399,11 +2407,16 @@ hyperv1DomainAttachStorageVolume(virDomainPtr domain, virDomainDiskDefPtr disk,
 {
     switch (disk->device) {
         case VIR_DOMAIN_DISK_DEVICE_DISK:
-            return hyperv1DomainAttachStorageExtent(domain, disk, controller,
-                    hostname);
-        case VIR_DOMAIN_DISK_DEVICE_LUN:
-            return hyperv1DomainAttachPhysicalDisk(domain, disk, controller,
-                    hostname);
+            if (disk->src->type == VIR_STORAGE_TYPE_FILE) {
+                return hyperv1DomainAttachStorageExtent(domain, disk, controller,
+                        hostname);
+            } else if (disk->src->type == VIR_STORAGE_TYPE_BLOCK) {
+                return hyperv1DomainAttachPhysicalDisk(domain, disk, controller,
+                        hostname);
+            } else {
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Invalid disk type"));
+                return -1;
+            }
         case VIR_DOMAIN_DISK_DEVICE_CDROM:
             return hyperv1DomainAttachCDROM(domain, disk, controller, hostname);
         default:
