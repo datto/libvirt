@@ -1024,6 +1024,7 @@ virCPUDataNew;
 virCPUDataParse;
 virCPUExpandFeatures;
 virCPUGetHost;
+virCPUGetHostIsSupported;
 virCPUGetModels;
 virCPUProbeHost;
 virCPUTranslate;
