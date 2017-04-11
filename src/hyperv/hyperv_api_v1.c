@@ -2539,45 +2539,40 @@ hyperv1ConnectGetVersion(virConnectPtr conn, unsigned long *version)
 {
     int result = -1;
     hypervPrivate *priv = conn->privateData;
-    CIM_DataFile *datafile = NULL;
+    Win32_OperatingSystem *os = NULL;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     char *p;
 
-    virBufferAddLit(&query, "Select * from CIM_DataFile where Name='c:\\\\windows\\\\system32\\\\vmms.exe' ");
-    if (hypervGetCIMDataFileList(priv, &query, &datafile) < 0)
+    virBufferAddLit(&query, "Select * from Win32_OperatingSystem ");
+    if (hypervGetWin32OperatingSystemList(priv, &query, &os) < 0)
         goto cleanup;
 
-    if (datafile == NULL) {
+    if (os == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not lookup data file for domain %s"),
                 "Msvm_VirtualSystemSettingData");
         goto cleanup;
     }
 
-    /* delete release number and last digit of build number */
-    p = strrchr(datafile->data->Version, '.');
-    if (p == NULL) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not parse version number from '%s'"),
-                datafile->data->Version);
-        goto cleanup;
-    }
-    p--;
-    *p = '\0';
+    /*
+     * Truncate micro to 3 digits
+     */
+    p = strrchr(os->data->Version, '.');
+    p[4] = '\0';
 
     /* Parse version string to long */
-    if (virParseVersionString(datafile->data->Version,
+    if (virParseVersionString(os->data->Version,
                 version, true) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not parse version number from '%s'"),
-                datafile->data->Version);
+                os->data->Version);
         goto cleanup;
     }
 
     result = 0;
 
 cleanup:
-    hypervFreeObject(priv, (hypervObject *) datafile);
+    hypervFreeObject(priv, (hypervObject *) os);
     virBufferFreeAndReset(&query);
     return result;
 }
