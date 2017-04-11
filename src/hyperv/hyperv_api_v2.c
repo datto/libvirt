@@ -582,9 +582,6 @@ hyperv2GetSASDByVSSDInstanceId(hypervPrivate *priv, const char *id,
     if (hyperv2GetMsvmStorageAllocationSettingDataList(priv, &query, data) < 0)
         goto cleanup;
 
-    if (*data == NULL)
-        goto cleanup;
-
     result = 0;
 
 cleanup:
