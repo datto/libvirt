@@ -33,6 +33,9 @@
 
 # define HYPERV_WQL_QUERY_INITIALIZER { NULL, NULL }
 
+# define MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_SELECTOR \
+    "CreationClassName=Msvm_VirtualSystemManagementService"
+
 int hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
                          const char *detail);
 
@@ -238,4 +241,15 @@ int hypervMsvmComputerSystemToDomain(virConnectPtr conn,
 int hypervMsvmComputerSystemFromDomain(virDomainPtr domain,
                                        Msvm_ComputerSystem **computerSystem);
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_VirtualSystemSettingData
+ */
+int hypervGetMsvmVirtualSystemSettingDataFromUUID(hypervPrivate *priv,
+        const char *uuid_string, Msvm_VirtualSystemSettingData **list);
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Msvm_MemorySettingData
+ */
+int hypervGetMsvmMemorySettingDataFromVSSD(hypervPrivate *priv,
+        const char *vssd_instanceid, Msvm_MemorySettingData **list);
 #endif /* __HYPERV_WMI_H__ */
