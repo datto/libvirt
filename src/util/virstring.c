@@ -1180,3 +1180,25 @@ virStringEncodeBase64(const uint8_t *buf, size_t buflen)
 
     return ret;
 }
+
+/**
+ * virNumToStr:
+ * @num: Number to convert to string representation
+ *
+ * Converts number to string representation. The caller is responsible
+ * for freeing the result.
+ */
+char *
+virNumToStr(unsigned long num)
+{
+    int sz;
+    char *result = NULL;
+
+    sz = snprintf(NULL, 0, "%lu", num);
+    if (VIR_ALLOC_N(result, sz + 1) < 0)
+        return NULL;
+
+    sprintf(result, "%lu", num);
+    return result;
+}
+

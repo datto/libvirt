@@ -288,6 +288,8 @@ bool virStringBufferIsPrintable(const uint8_t *buf, size_t buflen);
 
 char *virStringEncodeBase64(const uint8_t *buf, size_t buflen);
 
+char *virNumToStr(unsigned long num);
+
 static inline void
 virStringTrimOptionalNewline(char *str)
 {
