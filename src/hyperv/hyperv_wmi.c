@@ -2,6 +2,7 @@
  * hyperv_wmi.c: general WMI over WSMAN related functions and structures for
  *               managing Microsoft Hyper-V hosts
  *
+ * Copyright (C) 2017 Datto Inc
  * Copyright (C) 2014 Red Hat, Inc.
  * Copyright (C) 2011 Matthias Bolte <matthias.bolte@googlemail.com>
  * Copyright (C) 2009 Michael Sievers <msievers83@googlemail.com>
@@ -139,6 +140,269 @@ hypervVerifyResponse(WsManClient *client, WsXmlDocH response,
     }
 
     return 0;
+}
+
+
+/*
+ * Methods to work with method invocation parameters
+ */
+
+/*
+ * hypervInitInvokeParamsList:
+ * @priv: hypervPrivate object associated with the connection.
+ * @method: The name of the method you are calling
+ * @selector: The selector for the object you are invoking the method on
+ * @obj: The WmiInfo of the object class you are invoking the method on.
+ *
+ * Create a new InvokeParamsList object for the method call.
+ *
+ * Returns a pointer to the newly instantiated object on success, which should
+ * be freed by hypervInvokeMethod. Otherwise returns NULL.
+ */
+hypervInvokeParamsListPtr
+hypervInitInvokeParamsList(hypervPrivate *priv, const char *method,
+        const char *selector, hypervWmiClassInfoListPtr obj)
+{
+    hypervInvokeParamsListPtr params = NULL;
+    hypervWmiClassInfoPtr info = NULL;
+
+    if (hypervGetWmiClassInfo(priv, obj, &info) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC(params) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(params->params,
+                HYPERV_DEFAULT_PARAM_COUNT) < 0) {
+        VIR_FREE(params);
+        goto cleanup;
+    }
+
+    params->method = method;
+    params->ns = info->rootUri;
+    params->resourceUri = info->resourceUri;
+    params->selector = selector;
+    params->nbParams = 0;
+    params->nbAvailParams = HYPERV_DEFAULT_PARAM_COUNT;
+
+ cleanup:
+    return params;
+}
+
+/*
+ * hypervFreeInvokeParams:
+ * @params: Params object to be freed
+ *
+ */
+void
+hypervFreeInvokeParams(hypervInvokeParamsListPtr params)
+{
+    hypervParamPtr p = NULL;
+    int i = 0;
+
+    if (params == NULL)
+        return;
+
+    for (i = 0; i < params->nbParams; i++) {
+        p = &(params->params[i]);
+
+        switch(p->type) {
+            case HYPERV_SIMPLE_PARAM:
+                VIR_FREE(p->simple.name);
+                VIR_FREE(p->simple.value);
+                break;
+            case HYPERV_EPR_PARAM:
+                virBufferFreeAndReset(p->epr.query);
+                break;
+            case HYPERV_EMBEDDED_PARAM:
+                virHashFree(p->embedded.table);
+                break;
+        }
+    }
+
+    VIR_DISPOSE_N(params->params, params->nbAvailParams);
+    VIR_FREE(params);
+}
+
+static inline int
+hypervCheckParams(hypervInvokeParamsListPtr params)
+{
+    if (params->nbParams + 1 > params->nbAvailParams) {
+        if (VIR_EXPAND_N(params->params, params->nbAvailParams, 5) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+/*
+ * hypervAddSimpleParam:
+ * @params: Params object to add to
+ * @name: Name of the parameter
+ * @value: Value of the parameter
+ *
+ * Add a param of type HYPERV_SIMPLE_PARAM, which is essentially a serialized
+ * key/value pair.
+ *
+ * Returns -1 on failure, 0 on success.
+ */
+int
+hypervAddSimpleParam(hypervInvokeParamsListPtr params, const char *name,
+        const char *value)
+{
+    int result = -1;
+    hypervParamPtr p = NULL;
+
+    if (hypervCheckParams(params) < 0)
+        goto cleanup;
+
+    p = &params->params[params->nbParams];
+    p->type = HYPERV_SIMPLE_PARAM;
+
+    if (VIR_STRDUP(p->simple.name, name) < 0)
+        goto cleanup;
+
+    if (VIR_STRDUP(p->simple.value, value) < 0) {
+        VIR_FREE(p->simple.name);
+        goto cleanup;
+    }
+    params->nbParams++;
+
+    result = 0;
+
+ cleanup:
+    return result;
+}
+
+/*
+ * hypervAddEprParam:
+ * @params: Params object to add to
+ * @name: Parameter name
+ * @priv: hypervPrivate object associated with the connection
+ * @query: WQL filter
+ * @eprInfo: WmiInfo of the object being filtered
+ *
+ * Adds an EPR param to the params list. Returns -1 on failure, 0 on success.
+ */
+int
+hypervAddEprParam(hypervInvokeParamsListPtr params, const char *name,
+        hypervPrivate *priv, virBufferPtr query,
+        hypervWmiClassInfoListPtr eprInfo)
+{
+    hypervParamPtr p = NULL;
+    hypervWmiClassInfoPtr classInfo = NULL;
+
+    if (hypervGetWmiClassInfo(priv, eprInfo, &classInfo) < 0 ||
+            hypervCheckParams(params) < 0)
+        return -1;
+
+    p = &params->params[params->nbParams];
+    p->type = HYPERV_EPR_PARAM;
+    p->epr.name = name;
+    p->epr.query = query;
+    p->epr.info = classInfo;
+    params->nbParams++;
+
+    return 0;
+}
+
+/*
+ * hypervCreateEmbeddedParam:
+ * @priv: hypervPrivate object associated with the connection
+ * @info: WmiInfo of the object type to serialize
+ *
+ * Instantiates a virHashTable pre-filled with all the properties pre-added
+ * a key/value pairs set to NULL. The user then sets only those properties that
+ * they wish to serialize, and passes the table via hypervAddEmbeddedParam.
+ *
+ * Returns a pointer to the virHashTable on success, otherwise NULL.
+ */
+virHashTablePtr
+hypervCreateEmbeddedParam(hypervPrivate *priv, hypervWmiClassInfoListPtr info)
+{
+    size_t i;
+    int count = 0;
+    virHashTablePtr table = NULL;
+    XmlSerializerInfo *typeinfo = NULL;
+    XmlSerializerInfo *item = NULL;
+    hypervWmiClassInfoPtr classInfo = NULL;
+
+    /* Get the typeinfo out of the class info list */
+    if (hypervGetWmiClassInfo(priv, info, &classInfo) < 0)
+        goto error;
+
+    typeinfo = classInfo->serializerInfo;
+
+    /* loop through the items to find out how many fields there are */
+    for (i = 0; typeinfo[i+1].name != NULL; i++) {}
+
+    count = i + 1;
+    table = virHashCreate(count, virHashValueFree);
+    if (table == NULL)
+        goto error;
+
+    for (i = 0; typeinfo[i+1].name != NULL; i++) {
+        item = &typeinfo[i];
+
+        if (virHashAddEntry(table, item->name, NULL) < 0)
+            goto error;
+    }
+
+    return table;
+
+ error:
+    virHashFree(table);
+    return table;
+}
+
+int
+hypervSetEmbeddedProperty(virHashTablePtr table, const char *name, char *value)
+{
+    char *tmp = NULL;
+
+    if (VIR_STRDUP(tmp, value) < 0)
+        return -1;
+
+    return virHashUpdateEntry(table, name, tmp);
+}
+
+/*
+ * hypervAddEmbeddedParam:
+ * @params: Params list to add to
+ * @priv: hypervPrivate object associated with the connection
+ * @name: Name of the parameter
+ * @table: table of properties to add
+ * @info: WmiInfo of the object to serialize
+ *
+ * Add a virHashTable containing object properties as an embedded param to
+ * an invocation list. Returns -1 on failure, 0 on success.
+ */
+int
+hypervAddEmbeddedParam(hypervInvokeParamsListPtr params, hypervPrivate *priv,
+        const char *name, virHashTablePtr table, hypervWmiClassInfoListPtr info)
+{
+    int result = -1;
+    hypervParamPtr p = NULL;
+    hypervWmiClassInfoPtr classInfo = NULL;
+
+    if (hypervCheckParams(params) < 0)
+        goto cleanup;
+
+    /* Get the typeinfo out of the class info list */
+    if (hypervGetWmiClassInfo(priv, info, &classInfo) < 0)
+        goto cleanup;
+
+    p = &params->params[params->nbParams];
+    p->type = HYPERV_EMBEDDED_PARAM;
+    p->embedded.name = name;
+    p->embedded.table = table;
+    p->embedded.info = classInfo;
+    params->nbParams++;
+
+    result = 0;
+
+ cleanup:
+    return result;
 }
 
 
