@@ -536,6 +536,40 @@ virStrToDouble(char const *s,
     return 0;
 }
 
+/**
+ * Converts signed number to string representation. The caller is responsible
+ * for freeing the result.
+ */
+int
+virNumToStr_l(long num, char **dst)
+{
+    int sz;
+
+    sz = snprintf(NULL, 0, "%ld", num);
+    if (sz > 0 && VIR_ALLOC_N(*dst, sz + 1) < 0)
+        return -1;
+
+    snprintf(*dst, sz + 1, "%ld", num);
+    return 0;
+}
+
+/**
+ * Converts unsigned number to string representation. The caller is responsible
+ * for freeing the result.
+ */
+int
+virNumToStr_ul(unsigned long num, char **dst)
+{
+    int sz;
+
+    sz = snprintf(NULL, 0, "%lu", num);
+    if (sz > 0 && VIR_ALLOC_N(*dst, sz + 1) < 0)
+        return -1;
+
+    snprintf(*dst, sz + 1, "%lu", num);
+    return 0;
+}
+
 int
 virVasprintfInternal(bool report,
                      int domcode,

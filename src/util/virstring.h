@@ -109,6 +109,13 @@ int virStrToDouble(char const *s,
                    double *result)
     ATTRIBUTE_RETURN_CHECK;
 
+int virNumToStr_l(long num,
+                  char **dst)
+    ATTRIBUTE_RETURN_CHECK;
+int virnumToStr_ul(unsigned long num,
+                    char **dst)
+    ATTRIBUTE_RETURN_CHECK;
+
 void virSkipSpaces(const char **str) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesAndBackslash(const char **str) ATTRIBUTE_NONNULL(1);
 void virTrimSpaces(char *str, char **endp) ATTRIBUTE_NONNULL(1);
@@ -287,6 +294,7 @@ bool virStringIsPrintable(const char *str);
 bool virStringBufferIsPrintable(const uint8_t *buf, size_t buflen);
 
 char *virStringEncodeBase64(const uint8_t *buf, size_t buflen);
+
 
 static inline void
 virStringTrimOptionalNewline(char *str)
