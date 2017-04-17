@@ -151,6 +151,9 @@ int hypervSetEmbeddedProperty(virHashTablePtr table, const char *name,
 int hypervAddEmbeddedParam(hypervInvokeParamsListPtr params, hypervPrivate *priv,
         const char *name, virHashTablePtr table, hypervWmiClassInfoListPtr info);
 
+int hypervInvokeMethod(hypervPrivate *priv, hypervInvokeParamsListPtr params,
+        WsXmlDocH *res);
+
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * CIM/Msvm_ReturnCode
  */
