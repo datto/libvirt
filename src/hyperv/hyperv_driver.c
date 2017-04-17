@@ -1459,6 +1459,100 @@ hypervDomainSendKey(virDomainPtr domain, unsigned int codeset,
 }
 
 
+static int
+hypervDomainSetMemoryFlags(virDomainPtr domain, unsigned long memory,
+        unsigned int flags)
+{
+    int result = -1;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    hypervPrivate *priv = domain->conn->privateData;
+    char *memory_str = NULL;
+    hypervInvokeParamsListPtr params = NULL;
+    unsigned long memory_mb = memory / 1024;
+    Msvm_VirtualSystemSettingData *vssd = NULL;
+    Msvm_MemorySettingData *memsd = NULL;
+    virBuffer eprQuery = VIR_BUFFER_INITIALIZER;
+    virHashTablePtr memResource = NULL;
+
+    virCheckFlags(0, -1);
+
+    /* memory has to be a multiple of 2; round up if necessary */
+    if (memory_mb % 2) memory_mb++;
+
+    if (virAsprintf(&memory_str, "%lu", memory_mb) < 0)
+        goto cleanup;
+
+    virUUIDFormat(domain->uuid, uuid_string);
+
+    if (hypervGetMsvmVirtualSystemSettingDataFromUUID(priv, uuid_string, &vssd) < 0)
+        goto cleanup;
+
+    if (hypervGetMsvmMemorySettingDataFromVSSD(priv, vssd->data.common->InstanceID,
+                &memsd) < 0)
+        goto cleanup;
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1) {
+        params = hypervInitInvokeParamsList(priv, "ModifyVirtualSystemResources",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_SELECTOR,
+                Msvm_VirtualSystemManagementService_WmiInfo);
+
+        virBufferAddLit(&eprQuery, MSVM_COMPUTERSYSTEM_WQL_SELECT);
+        virBufferAsprintf(&eprQuery, "where Name = \"%s\"", uuid_string);
+
+        if (hypervAddEprParam(params, "ComputerSystem", priv, &eprQuery,
+                    Msvm_ComputerSystem_WmiInfo) < 0)
+            goto cleanup;
+
+    } else if (priv->wmiVersion == HYPERV_WMI_VERSION_V2) {
+        params = hypervInitInvokeParamsList(priv, "ModifyResourceSettings",
+                MSVM_VIRTUALSYSTEMMANAGEMENTSERVICE_SELECTOR,
+                Msvm_VirtualSystemManagementService_WmiInfo);
+    }
+
+    memResource = hypervCreateEmbeddedParam(priv, Msvm_MemorySettingData_WmiInfo);
+    if (memResource == NULL)
+        goto cleanup;
+
+    if (hypervSetEmbeddedProperty(memResource, "VirtualQuantity", memory_str) < 0)
+        goto cleanup;
+
+    if (hypervSetEmbeddedProperty(memResource, "InstanceID",
+                memsd->data.common->InstanceID) < 0)
+        goto cleanup;
+
+
+    if (priv->wmiVersion == HYPERV_WMI_VERSION_V1) {
+        if (hypervAddEmbeddedParam(params, priv, "ResourceSettingData",
+                    memResource, Msvm_MemorySettingData_WmiInfo) < 0)
+            goto cleanup;
+
+    } else if (priv->wmiVersion == HYPERV_WMI_VERSION_V2) {
+        if (hypervAddEmbeddedParam(params, priv, "ResourceSettings",
+                    memResource, Msvm_MemorySettingData_WmiInfo) < 0)
+            goto cleanup;
+    }
+
+    if (hypervInvokeMethod(priv, params, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not set memory"));
+        goto cleanup;
+    }
+
+    result = 0;
+ cleanup:
+    if (memory_str) VIR_FREE(memory_str);
+    hypervFreeObject(priv, (hypervObject *) vssd);
+    hypervFreeObject(priv, (hypervObject *) memsd);
+    return result;
+}
+
+
+static int
+hypervDomainSetMemory(virDomainPtr domain, unsigned long memory)
+{
+    return hypervDomainSetMemoryFlags(domain, memory, 0);
+}
+
+
 static virHypervisorDriver hypervHypervisorDriver = {
     .name = "Hyper-V",
     .connectOpen = hypervConnectOpen, /* 0.9.5 */
@@ -1493,6 +1587,8 @@ static virHypervisorDriver hypervHypervisorDriver = {
     .domainHasManagedSaveImage = hypervDomainHasManagedSaveImage, /* 0.9.5 */
     .domainManagedSaveRemove = hypervDomainManagedSaveRemove, /* 0.9.5 */
     .domainSendKey = hypervDomainSendKey, /* TODO: version */
+    .domainSetMemory = hypervDomainSetMemory, /* TODO: version */
+    .domainSetMemoryFlags = hypervDomainSetMemoryFlags, /* TODO: version */
     .connectIsAlive = hypervConnectIsAlive, /* 0.9.8 */
 };
 
