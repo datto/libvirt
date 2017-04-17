@@ -1302,6 +1302,13 @@ hypervGetMsvmMemorySettingDataList(hypervPrivate *priv, virBufferPtr query,
                                  (hypervObject **) list);
 }
 
+int hypervGetMsvmKeyboardList(hypervPrivate *priv, virBufferPtr query,
+                              Msvm_Keyboard **list)
+{
+    return hypervGetWmiClassList(priv, Msvm_Keyboard_WmiInfo, query,
+                                 (hypervObject **) list);
+}
+
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
