@@ -356,7 +356,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         goto cleanup;
     }
 
-    if (STRPREFIX(winVersion, HYPERV_VERSION_2008)) {
+    if (STRPREFIX(winVersion, HYPERV_VERSION_2008) ||
+        STRPREFIX(winVersion, HYPERV_VERSION_2012)) {
         /* Check if the connection can be established and if the server has the
          * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
          * succeeds than the connection has been established. If the returned list
@@ -375,7 +376,7 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         }
 
         hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
-    } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012) ||
+    } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012_R2) ||
                STRPREFIX(winVersion, HYPERV_VERSION_2016)) {
         /* Check if the connection can be established and if the server has the
          * Hyper-V role installed. If the call to hyperv2GetMsvmComputerSystemList

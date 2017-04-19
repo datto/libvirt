@@ -26,7 +26,8 @@
 # include "viruri.h"
 
 #define HYPERV_VERSION_2008 "6.1"
-#define HYPERV_VERSION_2012 "6.3"
+#define HYPERV_VERSION_2012 "6.2"
+#define HYPERV_VERSION_2012_R2 "6.3"
 #define HYPERV_VERSION_2016 "10.0"
 
 typedef struct _hypervParsedUri hypervParsedUri;
