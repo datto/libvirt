@@ -42,6 +42,22 @@
 
 VIR_LOG_INIT("hyperv.hyperv_api_v2")
 
+static void
+hypervDebugResponseXml(WsXmlDocH response)
+{
+#ifdef ENABLE_DEBUG
+    char *buf = NULL;
+    int len;
+
+    ws_xml_dump_memory_enc(response, &buf, &len, "UTF-8");
+
+    if (buf && len > 0)
+        VIR_DEBUG("%s", buf);
+
+    ws_xml_free_memory(buf);
+#endif
+}
+
 /*
  * WMI invocation functions
  *
@@ -84,8 +100,8 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     xpath_expr_string = virBufferContentAndReset(&xpath_expr_buf);
     if (!xpath_expr_string) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not lookup %s for %s invocation"), "ReturnValue",
-                "RequestStateChange");
+                       _("Could not lookup ReturnValue for %s invocation"),
+                       methodName);
         goto cleanup;
     }
 
@@ -95,13 +111,14 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
 
     if (!returnValue) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
-                _("Could not lookup %s for %s invocation"), "ReturnValue",
-                "RequestStateChange");
+                       _("Could not lookup ReturnValue for %s invocation"),
+                       methodName);
+        hypervDebugResponseXml(response);
         goto cleanup;
     }
 
     if (virStrToLong_i(returnValue, NULL, 10, &returnCode) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not parse return code"));
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", _("Could not parse return code"));
         goto cleanup;
     }
 
@@ -109,19 +126,18 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
         virBufferAsprintf(&xpath_expr_buf,
                 "/s:Envelope/s:Body/p:%s_OUTPUT/p:Job/a:ReferenceParameters/"
                 "w:SelectorSet/w:Selector[@Name='InstanceID']", methodName);
-        xpath_expr_string = virBufferContentAndReset(&xpath_expr_buf);
-        if (!xpath_expr_string) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                    _("Could not lookup %s for %s invocation"), "ReturnValue",
-                    "RequestStateChange");
+
+        if (virBufferCheckError(&xpath_expr_buf) < 0)
             goto cleanup;
-        }
+
+        xpath_expr_string = virBufferContentAndReset(&xpath_expr_buf);
 
         /* Get Msvm_ConcreteJob_V2 object */
         instanceID = ws_xml_get_xpath_value(response, xpath_expr_string);
         if (!instanceID) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
-                    _("Could not look up instance ID for RequestStateChange invocation"));
+                           _("Could not look up instance ID for %s invocation"),
+                           methodName);
             goto cleanup;
         }
 
@@ -135,8 +151,8 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
 
             if (!job) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
-                        _("Could not lookup %s for %s invocation"), "ReturnValue",
-                        "RequestStateChange");
+                               _("Could not lookup ConcreteJob for %s invocation"),
+                               methodName);
                 goto cleanup;
             }
 
@@ -168,8 +184,9 @@ hyperv2InvokeMethodXml(hypervPrivate *priv, WsXmlDocH xmlDocRoot,
     } else if (returnCode != CIM_RETURNCODE_COMPLETED_WITH_NO_ERROR) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Invocation of %s returned an error: %s (%d)"),
-                "RequestStateChange", hypervReturnCodeToString(returnCode),
+                methodName, hypervReturnCodeToString(returnCode),
                 returnCode);
+        hypervDebugResponseXml(response);
         goto cleanup;
     }
 
