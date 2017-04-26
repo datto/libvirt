@@ -3301,8 +3301,10 @@ hyperv1DomainGetState(virDomainPtr domain, int *state, int *reason,
 }
 
 char *
-hyperv1DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
-        unsigned int screen ATTRIBUTE_UNUSED, unsigned int flags ATTRIBUTE_UNUSED)
+hyperv1DomainScreenshot(virDomainPtr domain,
+                        virStreamPtr stream,
+                        unsigned int screen ATTRIBUTE_UNUSED,
+                        unsigned int flags ATTRIBUTE_UNUSED)
 {
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;

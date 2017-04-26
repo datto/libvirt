@@ -3388,8 +3388,8 @@ hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
         "CreationClassName=Msvm_VirtualSystemManagementService";
     invokeXmlParam *params;
     WsXmlDocH ret_doc = NULL;
-    int xRes = 640;
-    int yRes = 480;
+    int xRes = 800;
+    int yRes = 600;
     char *imageDataText = NULL;
     char *imageDataBuffer = NULL;
     size_t imageDataBufferSize;
@@ -3428,7 +3428,8 @@ hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     if (hyperv2GetMsvmVideoHeadList(priv, &query, &heads) < 0)
         goto thumbnail;
 
-    if (heads != NULL) {
+    // yep, EnabledState is a "numeric string"...
+    if (heads != NULL && STREQLEN(heads->data->EnabledState, "2", 1)) {
         xRes = heads->data->CurrentHorizontalResolution;
         yRes = heads->data->CurrentVerticalResolution;
     }
