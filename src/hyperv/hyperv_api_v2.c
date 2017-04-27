@@ -3390,6 +3390,72 @@ hyperv2DomainGetState(virDomainPtr domain, int *state, int *reason,
     return result;
 }
 
+static int
+hyperv2GetVideoResolution(hypervPrivate *priv, char *vm_uuid, int *xRes,
+        int *yRes, bool fallback)
+{
+    int ret = -1;
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VideoHead_V2 *heads = NULL;
+    Msvm_S3DisplayController_V2 *s3Display = NULL;
+    Msvm_SyntheticDisplayController_V2 *synthetic = NULL;
+    const char *wmiClass = "Msvm_SyntheticDisplayController";
+    char *deviceId = NULL;
+
+    if (fallback) {
+        wmiClass = "Msvm_S3DisplayController";
+    }
+
+    virBufferAsprintf(&query, "Select * from %s where SystemName = \"%s\"",
+                      wmiClass,
+                      vm_uuid);
+
+    if (fallback) {
+        if (hyperv2GetMsvmS3DisplayControllerList(priv, &query, &s3Display) < 0 ||
+                s3Display == NULL)
+            goto cleanup;
+
+        deviceId = s3Display->data->DeviceID;
+    } else {
+        if (hyperv2GetMsvmSyntheticDisplayControllerList(priv, &query, &synthetic) < 0 ||
+                synthetic == NULL)
+            goto cleanup;
+
+        deviceId = synthetic->data->DeviceID;
+    }
+
+    virBufferFreeAndReset(&query);
+
+    virBufferAsprintf(&query,
+            "associators of "
+            "{%s."
+            "CreationClassName=\"%s\","
+            "DeviceID=\"%s\","
+            "SystemCreationClassName=\"Msvm_ComputerSystem\","
+            "SystemName=\"%s\"} "
+            "where AssocClass = Msvm_VideoHeadOnController "
+            "ResultClass = Msvm_VideoHead",
+            wmiClass, wmiClass, deviceId, vm_uuid);
+
+    if (hyperv2GetMsvmVideoHeadList(priv, &query, &heads) < 0)
+        goto cleanup;
+
+    // yep, EnabledState is a "numeric string"...
+    if (heads != NULL && STREQLEN(heads->data->EnabledState, "2", 1)) {
+        *xRes = heads->data->CurrentHorizontalResolution;
+        *yRes = heads->data->CurrentVerticalResolution;
+        ret = 0;
+    }
+
+ cleanup:
+    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) s3Display);
+    hypervFreeObject(priv, (hypervObject *) synthetic);
+    hypervFreeObject(priv, (hypervObject *) heads);
+
+    return ret;
+}
+
 char *
 hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
         unsigned int screen ATTRIBUTE_UNUSED, unsigned int flags ATTRIBUTE_UNUSED)
@@ -3397,16 +3463,14 @@ hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
     char uuid_string[VIR_UUID_STRING_BUFLEN];
     hypervPrivate *priv = domain->conn->privateData;
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VideoHead_V2 *heads = NULL;
-    Msvm_SyntheticDisplayController_V2 *ctrlr = NULL;
     eprParam eprparam;
     simpleParam x_param, y_param;
     const char *selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
     invokeXmlParam *params;
     WsXmlDocH ret_doc = NULL;
-    int xRes = 800;
-    int yRes = 600;
+    int xRes = 640;
+    int yRes = 480;
     char *imageDataText = NULL;
     char *imageDataBuffer = NULL;
     size_t imageDataBufferSize;
@@ -3422,36 +3486,15 @@ hyperv2DomainScreenshot(virDomainPtr domain, virStreamPtr stream,
 
     virUUIDFormat(domain->uuid, uuid_string);
 
-    /* get current resolution of VM */
-    virBufferAsprintf(&query, "select * from Msvm_SyntheticDisplayController "
-                              "where SystemName = \"%s\"", uuid_string);
-    if (hyperv2GetMsvmSyntheticDisplayControllerList(priv, &query, &ctrlr) < 0)
-        goto thumbnail;
-
-    if (ctrlr == NULL)
-        goto thumbnail;
-
-    virBufferFreeAndReset(&query);
-    virBufferAsprintf(&query,
-            "associators of "
-            "{Msvm_SyntheticDisplayController."
-            "CreationClassName=\"Msvm_SyntheticDisplayController\","
-            "DeviceID=\"%s\","
-            "SystemCreationClassName=\"Msvm_ComputerSystem\","
-            "SystemName=\"%s\"} "
-            "where AssocClass = Msvm_VideoHeadOnController "
-            "ResultClass = Msvm_VideoHead",
-            ctrlr->data->DeviceID, uuid_string);
-    if (hyperv2GetMsvmVideoHeadList(priv, &query, &heads) < 0)
-        goto thumbnail;
-
-    // yep, EnabledState is a "numeric string"...
-    if (heads != NULL && STREQLEN(heads->data->EnabledState, "2", 1)) {
-        xRes = heads->data->CurrentHorizontalResolution;
-        yRes = heads->data->CurrentVerticalResolution;
+    /* in gen1 VMs, there are 2 video heads used, initially S3DisplayConttroller
+     * and when guests OS initializes it's video acceleration driver it will
+     * switch to SyntheticDisplayController, therefore try to get res from the
+     * "synthetic" first then fall back to "s3" */
+    if (hyperv2GetVideoResolution(priv, uuid_string, &xRes, &yRes, false) < 0) {
+        if (hyperv2GetVideoResolution(priv, uuid_string, &xRes, &yRes, true) < 0)
+            goto cleanup;
     }
 
-thumbnail:
     /* Prepare EPR param - get Msvm_VirtualSystemSettingData_V2 */
     virBufferFreeAndReset(&query);
     virBufferAsprintf(&query,
@@ -3550,10 +3593,6 @@ thumbnail:
 
 cleanup:
     virBufferFreeAndReset(&query);
-    if (ctrlr)
-        hypervFreeObject(priv, (hypervObject *) ctrlr);
-    if (heads)
-        hypervFreeObject(priv, (hypervObject *) heads);
     if (ret_doc)
         ws_xml_destroy_doc(ret_doc);
     VIR_FREE(imageDataBuffer);
