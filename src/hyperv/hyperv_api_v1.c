@@ -4247,6 +4247,7 @@ hyperv1DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
         case VIR_DOMAIN_DEVICE_CHR:
             if (hyperv1DomainAttachSerial(domain, dev->data.chr) < 0)
                 goto cleanup;
+            break;
         default:
             /* unsupported device type */
             virReportError(VIR_ERR_INTERNAL_ERROR,
