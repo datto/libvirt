@@ -1702,7 +1702,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
      */
     virBufferFreeAndReset(&query);
     virBufferAddLit(&query, MSVM_VIRTUALETHERNETSWITCH_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name=\"%s\"", net->data.network.name);
+    virBufferAsprintf(&query, " where ElementName=\"%s\"", net->data.bridge.brname);
 
     if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0
             || vSwitch == NULL)
@@ -1723,7 +1723,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     if (virAsprintf(&switch__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_VirtualEthernetSwitch.CreationClassName="
                 "\"Msvm_VirtualEthernetSwitch\",Name=\"%s\"",
-                computer->data->ElementName, net->data.network.name) < 0)
+                computer->data->ElementName, vSwitch->data->Name) < 0)
         goto cleanup;
 
     /* Get the sepsd instance ID out of the XML response */

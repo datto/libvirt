@@ -1594,7 +1594,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     char *connection__PATH = NULL;
     unsigned char guid[VIR_UUID_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem_V1 *computer = NULL;
+    Msvm_VirtualSwitch_V1 *vSwitch = NULL;
     eprParam virtualSwitch_REF, ComputerSystem_REF;
     simpleParam virtualSwitch_Name, virtualSwitch_FriendlyName,
                 virtualSwitch_ScopeOfResidence;
@@ -1602,12 +1602,20 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     invokeXmlParam *params = NULL;
     properties_t *NewResources = NULL;
 
+    /* get the vSwitch first so we can get data from it as needed */
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
+    virBufferAsprintf(&query, "where ElementName = \"%s\"", net->data.bridge.brname);
+
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &vSwitch) < 0 || vSwitch == NULL)
+        goto cleanup;
+
     /*
      * step 1: create virtual switch port
      * https://msdn.microsoft.com/en-us/library/cc136782(v=vs.85).aspx
      */
     virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", net->data.network.name);
+    virBufferAsprintf(&query, "where Name = \"%s\"", vSwitch->data->Name);
+
     virtualSwitch_REF.query = &query;
     virtualSwitch_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
 
@@ -1647,7 +1655,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
                 vswitch_selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not create port for virtual switch '%s'"),
-                net->data.network.name);
+                net->data.bridge.brname);
         goto cleanup;
     }
 
@@ -1663,13 +1671,11 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     virtualSystemIdentifiers = virBufferContentAndReset(&query);
 
     /* build the __PATH variable of the switch port */
-    if (hyperv1MsvmComputerSystemFromDomain(domain, &computer) < 0)
-        goto cleanup;
     if (virAsprintf(&connection__PATH, "\\\\%s\\root\\virtualization:"
                 "Msvm_SwitchPort.CreationClassName=\"Msvm_SwitchPort\","
                 "Name=\"%s\",SystemCreationClassName=\"Msvm_VirtualSwitch\","
-                "SystemName=\"%s\"", computer->data->ElementName,
-                switchport_guid_string, net->data.network.name) < 0)
+                "SystemName=\"%s\"", hostname,
+                switchport_guid_string, vSwitch->data->Name) < 0)
         goto cleanup;
 
     /* build the ComputerSystem_REF parameter */
@@ -1719,13 +1725,13 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     result = 0;
 
 cleanup:
+    hypervFreeObject(priv, (hypervObject *) vSwitch);
     VIR_FREE(vswitch_selector);
     VIR_FREE(virtualSystemIdentifiers);
     VIR_FREE(connection__PATH);
     VIR_FREE(NewResources);
     VIR_FREE(params);
     virBufferFreeAndReset(&query);
-    hypervFreeObject(priv, (hypervObject *) computer);
 
     return result;
 }
