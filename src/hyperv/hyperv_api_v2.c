@@ -1509,7 +1509,7 @@ hyperv2DomainDefParseEthernetAdapter(virDomainDefPtr def,
     }
 
     /* get bridge name */
-    if (VIR_STRDUP(temp, vSwitch->data->Name) < 0) {
+    if (VIR_STRDUP(temp, vSwitch->data->ElementName) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not set bridge name"));
         goto cleanup;
