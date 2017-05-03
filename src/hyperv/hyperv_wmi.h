@@ -43,6 +43,8 @@
 
 typedef struct _hypervObject hypervObject;
 
+void hypervDebugResponseXml(WsXmlDocH response);
+
 int hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
                          const char *detail);
 

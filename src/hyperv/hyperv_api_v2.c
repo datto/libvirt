@@ -42,22 +42,6 @@
 
 VIR_LOG_INIT("hyperv.hyperv_api_v2")
 
-static void
-hypervDebugResponseXml(WsXmlDocH response)
-{
-#ifdef ENABLE_DEBUG
-    char *buf = NULL;
-    int len;
-
-    ws_xml_dump_memory_enc(response, &buf, &len, "UTF-8");
-
-    if (buf && len > 0)
-        VIR_DEBUG("%s", buf);
-
-    ws_xml_free_memory(buf);
-#endif
-}
-
 /*
  * WMI invocation functions
  *
