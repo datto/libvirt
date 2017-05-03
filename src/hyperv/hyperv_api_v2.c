@@ -1616,7 +1616,7 @@ cleanup:
 /* Functions for creating and attaching virtual devices */
 static int
 hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
-        virDomainNetDefPtr net, char *hostname ATTRIBUTE_UNUSED)
+        virDomainNetDefPtr net, char *hostname)
 {
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
@@ -1628,7 +1628,6 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     unsigned char vsi_guid[VIR_UUID_BUFLEN];
     Msvm_VirtualSystemSettingData_V2 *vssd = NULL;
     Msvm_VirtualEthernetSwitch_V2 *vSwitch = NULL;
-    Msvm_ComputerSystem_V2 *computer = NULL;
     embeddedParam sepsd_embedded, epasd_embedded;
     char *switch__PATH = NULL;
     char *sepsd__PATH = NULL;
@@ -1702,7 +1701,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
      */
     virBufferFreeAndReset(&query);
     virBufferAddLit(&query, MSVM_VIRTUALETHERNETSWITCH_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name=\"%s\"", net->data.network.name);
+    virBufferAsprintf(&query, " where Name=\"%s\"", net->data.bridge.brname);
 
     if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0
             || vSwitch == NULL)
@@ -1716,14 +1715,11 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     VIR_FREE(params);
     virBufferFreeAndReset(&query);
 
-    if (hyperv2MsvmComputerSystemFromDomain(domain, &computer) < 0)
-        goto cleanup;
-
     /* build the two __PATH variables */
     if (virAsprintf(&switch__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_VirtualEthernetSwitch.CreationClassName="
                 "\"Msvm_VirtualEthernetSwitch\",Name=\"%s\"",
-                computer->data->ElementName, net->data.network.name) < 0)
+                hostname, vSwitch->data->Name) < 0)
         goto cleanup;
 
     /* Get the sepsd instance ID out of the XML response */
@@ -1731,7 +1727,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     sepsd_instance_escaped = virStringReplace(sepsd_instance, "\\", "\\\\");
     if (virAsprintf(&sepsd__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_SyntheticEthernetPortSettingData.InstanceID=\"%s\"",
-                computer->data->ElementName, sepsd_instance_escaped) < 0)
+                hostname, sepsd_instance_escaped) < 0)
         goto cleanup;
 
     virBufferAddLit(&query, MSVM_VIRTUALSYSTEMSETTINGDATA_V2_WQL_SELECT);
@@ -1775,7 +1771,6 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) vSwitch);
-    hypervFreeObject(priv, (hypervObject *) computer);
     hypervFreeObject(priv, (hypervObject *) vssd);
     VIR_FREE(switch__PATH);
     VIR_FREE(sepsd__PATH);

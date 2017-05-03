@@ -1594,7 +1594,6 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     char *connection__PATH = NULL;
     unsigned char guid[VIR_UUID_BUFLEN];
     virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_ComputerSystem_V1 *computer = NULL;
     eprParam virtualSwitch_REF, ComputerSystem_REF;
     simpleParam virtualSwitch_Name, virtualSwitch_FriendlyName,
                 virtualSwitch_ScopeOfResidence;
@@ -1607,7 +1606,8 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
      * https://msdn.microsoft.com/en-us/library/cc136782(v=vs.85).aspx
      */
     virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, "where Name = \"%s\"", net->data.network.name);
+    virBufferAsprintf(&query, "where Name = \"%s\"", net->data.bridge.brname);
+
     virtualSwitch_REF.query = &query;
     virtualSwitch_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
 
@@ -1647,7 +1647,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
                 vswitch_selector, NULL) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                 _("Could not create port for virtual switch '%s'"),
-                net->data.network.name);
+                net->data.bridge.brname);
         goto cleanup;
     }
 
@@ -1663,13 +1663,11 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     virtualSystemIdentifiers = virBufferContentAndReset(&query);
 
     /* build the __PATH variable of the switch port */
-    if (hyperv1MsvmComputerSystemFromDomain(domain, &computer) < 0)
-        goto cleanup;
     if (virAsprintf(&connection__PATH, "\\\\%s\\root\\virtualization:"
                 "Msvm_SwitchPort.CreationClassName=\"Msvm_SwitchPort\","
                 "Name=\"%s\",SystemCreationClassName=\"Msvm_VirtualSwitch\","
-                "SystemName=\"%s\"", computer->data->ElementName,
-                switchport_guid_string, net->data.network.name) < 0)
+                "SystemName=\"%s\"", hostname,
+                switchport_guid_string, net->data.bridge.brname) < 0)
         goto cleanup;
 
     /* build the ComputerSystem_REF parameter */
@@ -1725,7 +1723,6 @@ cleanup:
     VIR_FREE(NewResources);
     VIR_FREE(params);
     virBufferFreeAndReset(&query);
-    hypervFreeObject(priv, (hypervObject *) computer);
 
     return result;
 }
