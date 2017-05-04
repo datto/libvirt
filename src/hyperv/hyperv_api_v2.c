@@ -42,22 +42,6 @@
 
 VIR_LOG_INIT("hyperv.hyperv_api_v2")
 
-static void
-hypervDebugResponseXml(WsXmlDocH response)
-{
-#ifdef ENABLE_DEBUG
-    char *buf = NULL;
-    int len;
-
-    ws_xml_dump_memory_enc(response, &buf, &len, "UTF-8");
-
-    if (buf && len > 0)
-        VIR_DEBUG("%s", buf);
-
-    ws_xml_free_memory(buf);
-#endif
-}
-
 /*
  * WMI invocation functions
  *
@@ -1525,7 +1509,7 @@ hyperv2DomainDefParseEthernetAdapter(virDomainDefPtr def,
     }
 
     /* get bridge name */
-    if (VIR_STRDUP(temp, vSwitch->data->Name) < 0) {
+    if (VIR_STRDUP(temp, vSwitch->data->ElementName) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not set bridge name"));
         goto cleanup;
@@ -1718,7 +1702,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
      */
     virBufferFreeAndReset(&query);
     virBufferAddLit(&query, MSVM_VIRTUALETHERNETSWITCH_V2_WQL_SELECT);
-    virBufferAsprintf(&query, " where Name=\"%s\"", net->data.network.name);
+    virBufferAsprintf(&query, " where ElementName=\"%s\"", net->data.bridge.brname);
 
     if (hyperv2GetMsvmVirtualEthernetSwitchList(priv, &query, &vSwitch) < 0
             || vSwitch == NULL)
@@ -1739,7 +1723,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     if (virAsprintf(&switch__PATH, "\\\\%s\\root\\virtualization\\v2:"
                 "Msvm_VirtualEthernetSwitch.CreationClassName="
                 "\"Msvm_VirtualEthernetSwitch\",Name=\"%s\"",
-                computer->data->ElementName, net->data.network.name) < 0)
+                computer->data->ElementName, vSwitch->data->Name) < 0)
         goto cleanup;
 
     /* Get the sepsd instance ID out of the XML response */
@@ -4374,6 +4358,7 @@ hyperv2DomainAttachDeviceFlags(virDomainPtr domain, const char *xml,
         case VIR_DOMAIN_DEVICE_CHR:
             if (hyperv2DomainAttachSerial(domain, dev->data.chr) < 0)
                 goto cleanup;
+            break;
         default:
             /* unsupported device type */
             virReportError(VIR_ERR_INTERNAL_ERROR,

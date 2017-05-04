@@ -31,10 +31,13 @@
 #include "viralloc.h"
 #include "viruuid.h"
 #include "virbuffer.h"
+#include "virlog.h"
 #include "hyperv_private.h"
 #include "hyperv_wmi.h"
 #include "virstring.h"
 #include "hyperv_wmi_cimtypes.generated.h"
+
+VIR_LOG_INIT("hyperv.hyperv_wmi")
 
 #define WS_SERIALIZER_FREE_MEM_WORKS 0
 
@@ -42,6 +45,21 @@
 #define VIR_FROM_THIS VIR_FROM_HYPERV
 
 
+void
+hypervDebugResponseXml(WsXmlDocH response)
+{
+#ifdef ENABLE_DEBUG
+    char *buf = NULL;
+    int len;
+
+    ws_xml_dump_memory_enc(response, &buf, &len, "UTF-8");
+
+    if (buf && len > 0)
+        VIR_DEBUG("%s", buf);
+
+    ws_xml_free_memory(buf);
+#endif
+}
 
 int
 hyperyVerifyResponse(WsManClient *client, WsXmlDocH response,
