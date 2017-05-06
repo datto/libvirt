@@ -1,5 +1,5 @@
 /*
- * hyperv_network_driver.c: network driver functions for managing
+ * hyperv_network_api_v1.c: network driver functions for managing
  *                          Microsoft Hyper-V host networks (API v1)
  *
  * Copyright (C) 2017 Datto Inc.
@@ -71,104 +71,140 @@ cleanup:
     return result;
 }
 
+static int
+hyperv1GetVirtualSwitchList(hypervPrivate *priv,
+                            const char *filter,
+                            Msvm_VirtualSwitch_V1 **list)
+{
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    Msvm_VirtualSwitch_V1 *vSwitch = NULL;
+    int count = 0;
+    int ret = -1;
+
+    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
+    virBufferAddLit(&query, " where HealthState = 5");
+
+    /* add any caller specified WQL filter */
+    if (filter)
+        virBufferAsprintf(&query, " and %s", filter);
+
+    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, list) < 0)
+        goto cleanup;
+
+    for (vSwitch = *list; vSwitch != NULL; vSwitch = vSwitch->next)
+        count++;
+
+    ret = count;
+
+ cleanup:
+    virBufferFreeAndReset(&query);
+
+    return ret;
+}
+
 /* exported API functions */
+#define MATCH(FLAG) (flags & (FLAG))
+int
+hyperv1ConnectListAllNetworks(virConnectPtr conn,
+                              virNetworkPtr **networks,
+                              unsigned int flags)
+{
+    hypervPrivate *priv = conn->privateData;
+    Msvm_VirtualSwitch_V1 *vSwitchList = NULL;
+    Msvm_VirtualSwitch_V1 *vSwitch = NULL;
+    virNetworkPtr network = NULL;
+    virNetworkPtr *nets = NULL;
+    int count = 0;
+    int ret = -1;
+    size_t i = 0;
+
+
+    virCheckFlags(VIR_CONNECT_LIST_NETWORKS_FILTERS_ALL, -1);
+
+
+    /* filter out flag options that will produce 0 results:
+     * - inactive: all networks are active
+     * - transient: all networks are persistend
+     * - no autostart: all networks are auto start
+     */
+    if ((MATCH(VIR_CONNECT_LIST_NETWORKS_INACTIVE) &&
+         !MATCH(VIR_CONNECT_LIST_NETWORKS_ACTIVE)) ||
+        (MATCH(VIR_CONNECT_LIST_NETWORKS_TRANSIENT) &&
+         !MATCH(VIR_CONNECT_LIST_NETWORKS_PERSISTENT)) ||
+        (MATCH(VIR_CONNECT_LIST_DOMAINS_NO_AUTOSTART) &&
+         !MATCH(VIR_CONNECT_LIST_NETWORKS_AUTOSTART))) {
+        if (networks && VIR_ALLOC_N(*networks, 1) < 0)
+            goto cleanup;
+
+        ret = 0;
+        goto cleanup;
+    }
+
+    count = hyperv1GetVirtualSwitchList(priv, NULL, &vSwitchList);
+
+    if (count < 0)
+        goto cleanup;
+
+    /* if caller did not pass networks, just return the count */
+    if (!networks) {
+        ret = count;
+        goto cleanup;
+    }
+
+    /* allocate count networks + terminating NULL element */
+    if (VIR_ALLOC_N(nets, count + 1) < 0)
+        goto cleanup;
+
+    vSwitch = vSwitchList;
+    for (i = 0; i < count; ++i) {
+        if (hyperv1MsvmVirtualSwitchToNetwork(conn, vSwitch, &network) < 0)
+            goto cleanup;
+
+        nets[i] = network;
+        network = NULL;
+        vSwitch = vSwitchList->next;
+    }
+
+    ret = count;
+    *networks = nets;
+    nets = NULL;
+
+ cleanup:
+    if (nets) {
+        for (i = 0; i < count; ++i)
+            virObjectUnref(nets[i]);
+
+        VIR_FREE(nets);
+    }
+
+    hypervFreeObject(priv, (hypervObject *) vSwitchList);
+
+    return ret;
+}
+#undef MATCH
 
 int
 hyperv1ConnectListNetworks(virConnectPtr conn, char **const names, int maxnames)
 {
-    int count = 0, i = 0;
-    bool success = false;
+    Msvm_VirtualSwitch_V1 *list = NULL, *entry = NULL;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch_V1 *switches = NULL, *entry = NULL;
+    int count = 0;
+    size_t i = 0;
+    bool success = false;
 
     if (maxnames <= 0)
         return 0;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, " where HealthState = 5");
+    if (hyperv1GetVirtualSwitchList(priv, NULL, &list) < 0)
+        return -1;
 
-    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &switches) < 0)
-        goto cleanup;
-
-    entry = switches;
-    while (entry != NULL) {
-        if (VIR_STRDUP(names[count], entry->data->ElementName) < 0)
+    entry = list;
+    for (i = 0; i < maxnames; ++i) {
+        if (VIR_STRDUP(names[i], entry->data->ElementName) < 0)
             goto cleanup;
+
         count++;
-        if (count >= maxnames)
-            break;
         entry = entry->next;
-    }
-
-    success = true;
-
-cleanup:
-    if (!success) {
-        for (i = 0; i < count; i++)
-            VIR_FREE(names[i]);
-
-        count = -1;
-    }
-    hypervFreeObject(priv, (hypervObject *) switches);
-    virBufferFreeAndReset(&query);
-    return count;
-}
-
-int
-hyperv1ConnectNumOfNetworks(virConnectPtr conn)
-{
-    int result = -1, count = 0;
-    hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
-
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, " where HealthState = 5");
-    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0)
-        goto cleanup;
-
-    for (virtualSwitch = virtualSwitchList; virtualSwitch != NULL;
-         virtualSwitch = virtualSwitch->next) {
-        count++;
-    }
-
-    result = count;
-
- cleanup:
-    hypervFreeObject(priv, (hypervObject *) virtualSwitchList);
-    virBufferFreeAndReset(&query);
-    return result;
-}
-
-int
-hyperv1ConnectListDefinedNetworks(virConnectPtr conn, char **const names, int maxnames)
-{
-    int i, count = 0;
-    bool success = false;
-    hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
-
-    if (maxnames <= 0)
-        return 0;
-
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, "where HealthState <> %d", 5);
-    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0)
-        goto cleanup;
-
-
-    for (virtualSwitch = virtualSwitchList; virtualSwitch != NULL;
-         virtualSwitch = virtualSwitch->next) {
-        if (VIR_STRDUP(names[count], virtualSwitch->data->ElementName) < 0)
-            goto cleanup;
-
-        count++;
-        if (count >= maxnames)
-            break;
     }
 
     success = true;
@@ -181,8 +217,7 @@ hyperv1ConnectListDefinedNetworks(virConnectPtr conn, char **const names, int ma
         count = -1;
     }
 
-    hypervFreeObject(priv, (hypervObject *) virtualSwitchList);
-    virBufferFreeAndReset(&query);
+    hypervFreeObject(priv, (hypervObject *) list);
 
     return count;
 }
@@ -192,54 +227,52 @@ hyperv1NetworkLookupByName(virConnectPtr conn, const char *name)
 {
     virNetworkPtr network = NULL;
     hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
+    char *filter = NULL;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, "where Description = \"%s\" and ElementName = \"%s\"",
-                      "Microsoft Virtual Switch", name);
-    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitch) < 0)
-        goto cleanup;
+    if (virAsprintf(&filter, "ElementName = \"%s\"", name) < 0)
+        return NULL;
 
-    if (virtualSwitch == NULL) {
+    if (hyperv1GetVirtualSwitchList(priv, filter, &virtualSwitch) < 0 ||
+        virtualSwitch == NULL) {
         virReportError(VIR_ERR_NO_NETWORK,
                        _("No network found with name %s"), name);
-        goto cleanup;
+        return NULL;
     }
+
 
     ignore_value(hyperv1MsvmVirtualSwitchToNetwork(conn, virtualSwitch, &network));
 
- cleanup:
     hypervFreeObject(priv, (hypervObject *) virtualSwitch);
-    virBufferFreeAndReset(&query);
 
     return network;
 }
 
 int
-hyperv1ConnectNumOfDefinedNetworks(virConnectPtr conn)
+hyperv1ConnectNumOfNetworks(virConnectPtr conn)
 {
-    int result = -1, count = 0;
-    hypervPrivate *priv = conn->privateData;
-    virBuffer query = VIR_BUFFER_INITIALIZER;
-    Msvm_VirtualSwitch_V1 *virtualSwitchList = NULL;
-    Msvm_VirtualSwitch_V1 *virtualSwitch = NULL;
+    Msvm_VirtualSwitch_V1 *vSwitchList = NULL;
+    int count = -1;
 
-    virBufferAddLit(&query, MSVM_VIRTUALSWITCH_V1_WQL_SELECT);
-    virBufferAsprintf(&query, "where HealthState <> %d", 5);
-    if (hyperv1GetMsvmVirtualSwitchList(priv, &query, &virtualSwitchList) < 0)
-        goto cleanup;
+    count = hyperv1GetVirtualSwitchList(conn->privateData, NULL, &vSwitchList);
 
-    for (virtualSwitch = virtualSwitchList; virtualSwitch != NULL;
-         virtualSwitch = virtualSwitch->next) {
-        count++;
-    }
+    hypervFreeObject(conn->privateData, (hypervObject *) vSwitchList);
 
-    result = count;
+    return count;
+}
 
- cleanup:
-    hypervFreeObject(priv, (hypervObject *) virtualSwitchList);
-    virBufferFreeAndReset(&query);
+int
+hyperv1ConnectListDefinedNetworks(virConnectPtr conn ATTRIBUTE_UNUSED,
+                                  char **const names ATTRIBUTE_UNUSED,
+                                  int maxnames ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always active */
+    return 0;
+}
 
-    return result;
+int
+hyperv1ConnectNumOfDefinedNetworks(virConnectPtr conn ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always active */
+    return 0;
 }

@@ -112,6 +112,7 @@ hypervSetupV1(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     d->domainSendKey = hyperv1DomainSendKey; /* TODO: get current version */
 
     /* Set up network driver functions */
+    n->connectListAllNetworks = hyperv1ConnectListAllNetworks; /* TODO: get current version */
     n->connectListNetworks = hyperv1ConnectListNetworks; /* TODO: get current version */
     n->connectNumOfNetworks = hyperv1ConnectNumOfNetworks; /* TODO: get current version */
     n->connectListDefinedNetworks = hyperv1ConnectListDefinedNetworks; /* TODO: get current version */
@@ -191,6 +192,7 @@ hypervSetupV2(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     d->domainSendKey = hyperv2DomainSendKey; /* TODO: get current version */
 
     /* Set up network driver functions */
+    n->connectListAllNetworks = hyperv2ConnectListAllNetworks; /* TODO: get current version */
     n->connectListNetworks = hyperv2ConnectListNetworks; /* TODO: get current version */
     n->connectNumOfNetworks = hyperv2ConnectNumOfNetworks; /* TODO: get current version */
     n->connectListDefinedNetworks = hyperv2ConnectListDefinedNetworks; /* TODO: get current version */
