@@ -1,5 +1,5 @@
 /*
- * hyperv_network_driver.c: network driver functions for managing
+ * hyperv_network_api_v1.h: network driver functions for managing
  *                          Microsoft Hyper-V host networks (API v1)
  *
  * Copyright (C) 2017 Datto Inc.
@@ -23,7 +23,9 @@
 #ifndef __HYPERV_NETWORK_API_V1_H__
 # define __HYPERV_NETWORK_API_V1_H__
 
-
+int hyperv1ConnectListAllNetworks(virConnectPtr conn,
+                                  virNetworkPtr **networks,
+                                  unsigned int flags);
 int hyperv1ConnectListNetworks(virConnectPtr conn, char **const names, int maxnames);
 int hyperv1ConnectNumOfNetworks(virConnectPtr conn);
 int hyperv1ConnectListDefinedNetworks(virConnectPtr conn, char **const names,
