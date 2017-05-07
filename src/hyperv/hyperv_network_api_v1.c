@@ -261,6 +261,84 @@ hyperv1ConnectNumOfNetworks(virConnectPtr conn)
     return count;
 }
 
+char *
+hyperv1NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
+{
+    char *xml = NULL;
+    hypervPrivate *priv = network->conn->privateData;
+    Msvm_VirtualSwitch_V1 *vSwitch = NULL;
+    char *filter = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virNetworkDefPtr def;
+
+    if (VIR_ALLOC(def) < 0)
+        return NULL;
+
+    virUUIDFormat(network->uuid, uuid_string);
+
+    if (virAsprintf(&filter, "Name = \"%s\"", uuid_string) < 0)
+        return NULL;
+
+    if (hyperv1GetVirtualSwitchList(priv, filter, &vSwitch) < 0 ||
+        vSwitch == NULL)
+        return NULL;
+
+    memcpy(def->uuid, network->uuid, VIR_UUID_BUFLEN);
+    def->uuid_specified = true;
+
+    if (VIR_STRDUP(def->name, vSwitch->data->ElementName) < 0)
+        goto cleanup;
+
+    def->forward.type = VIR_NETWORK_FORWARD_NONE;
+
+    xml = virNetworkDefFormat(def, flags);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) vSwitch);
+    virNetworkDefFree(def);
+
+    return xml;
+}
+
+int
+hyperv1NetworkSetAutostart(virNetworkPtr network ATTRIBUTE_UNUSED,
+                           int autostart)
+{
+    autostart = (autostart != 0);
+
+    if (!autostart) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Cannot deactivate network autostart"));
+        return -1;
+    }
+
+    return 0;
+}
+
+int
+hyperv1NetworkGetAutostart(virNetworkPtr network ATTRIBUTE_UNUSED,
+                           int *autostart)
+{
+    /* Hyper-V networks are always active */
+    *autostart = 1;
+
+    return 0;
+}
+
+int
+hyperv1NetworkIsActive(virNetworkPtr network ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always active */
+    return 1;
+}
+
+int
+hyperv1NetworkIsPersistent(virNetworkPtr network ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always persistent */
+    return 1;
+}
+
 int
 hyperv1ConnectListDefinedNetworks(virConnectPtr conn ATTRIBUTE_UNUSED,
                                   char **const names ATTRIBUTE_UNUSED,

@@ -258,6 +258,84 @@ hyperv2ConnectNumOfNetworks(virConnectPtr conn)
     return count;
 }
 
+char *
+hyperv2NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
+{
+    char *xml = NULL;
+    hypervPrivate *priv = network->conn->privateData;
+    Msvm_VirtualEthernetSwitch_V2 *vSwitch = NULL;
+    char *filter = NULL;
+    char uuid_string[VIR_UUID_STRING_BUFLEN];
+    virNetworkDefPtr def;
+
+    if (VIR_ALLOC(def) < 0)
+        return NULL;
+
+    virUUIDFormat(network->uuid, uuid_string);
+
+    if (virAsprintf(&filter, "Name = \"%s\"", uuid_string) < 0)
+        return NULL;
+
+    if (hyperv2GetVirtualSwitchList(priv, filter, &vSwitch) < 0 ||
+        vSwitch == NULL)
+        return NULL;
+
+    memcpy(def->uuid, network->uuid, VIR_UUID_BUFLEN);
+    def->uuid_specified = true;
+
+    if (VIR_STRDUP(def->name, vSwitch->data->ElementName) < 0)
+        goto cleanup;
+
+    def->forward.type = VIR_NETWORK_FORWARD_NONE;
+
+    xml = virNetworkDefFormat(def, flags);
+
+ cleanup:
+    hypervFreeObject(priv, (hypervObject *) vSwitch);
+    virNetworkDefFree(def);
+
+    return xml;
+}
+
+int
+hyperv2NetworkSetAutostart(virNetworkPtr network ATTRIBUTE_UNUSED,
+                           int autostart)
+{
+    autostart = (autostart != 0);
+
+    if (!autostart) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("Cannot deactivate network autostart"));
+        return -1;
+    }
+
+    return 0;
+}
+
+int
+hyperv2NetworkGetAutostart(virNetworkPtr network ATTRIBUTE_UNUSED,
+                           int *autostart)
+{
+    /* Hyper-V networks are always active */
+    *autostart = 1;
+
+    return 0;
+}
+
+int
+hyperv2NetworkIsActive(virNetworkPtr network ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always active */
+    return 1;
+}
+
+int
+hyperv2NetworkIsPersistent(virNetworkPtr network ATTRIBUTE_UNUSED)
+{
+    /* Hyper-V networks are always persistent */
+    return 1;
+}
+
 int
 hyperv2ConnectNumOfDefinedNetworks(virConnectPtr conn ATTRIBUTE_UNUSED)
 {

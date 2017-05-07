@@ -118,6 +118,10 @@ hypervSetupV1(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     n->connectListDefinedNetworks = hyperv1ConnectListDefinedNetworks; /* TODO: get current version */
     n->networkLookupByName = hyperv1NetworkLookupByName; /* TODO: get current version */
     n->connectNumOfDefinedNetworks = hyperv1ConnectNumOfDefinedNetworks; /* TODO: get current version */
+    n->networkGetXMLDesc = hyperv1NetworkGetXMLDesc; /* TODO: get current version */
+    n->networkSetAutostart = hyperv1NetworkSetAutostart; /* TODO: get current version */
+    n->networkGetAutostart = hyperv1NetworkGetAutostart; /* TODO: get current version */
+    n->networkIsPersistent = hyperv1NetworkIsPersistent; /* TODO: get current version */
 
     /* set up capabilities */
     priv->caps = hyperv1CapsInit(priv);
@@ -198,7 +202,10 @@ hypervSetupV2(virHypervisorDriverPtr d, virNetworkDriverPtr n,
     n->connectListDefinedNetworks = hyperv2ConnectListDefinedNetworks; /* TODO: get current version */
     n->networkLookupByName = hyperv2NetworkLookupByName; /* TODO: get current version */
     n->connectNumOfDefinedNetworks = hyperv2ConnectNumOfDefinedNetworks; /* TODO: get current version */
-
+    n->networkGetXMLDesc = hyperv2NetworkGetXMLDesc; /* TODO: get current version */
+    n->networkSetAutostart = hyperv2NetworkSetAutostart; /* TODO: get current version */
+    n->networkGetAutostart = hyperv2NetworkGetAutostart; /* TODO: get current version */
+    n->networkIsPersistent = hyperv2NetworkIsPersistent; /* TODO: get current version */
     /* set up capabilities */
     priv->caps = hyperv2CapsInit(priv);
     if (priv->caps == NULL)
