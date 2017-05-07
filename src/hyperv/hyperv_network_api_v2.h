@@ -33,6 +33,10 @@ int hyperv2ConnectListDefinedNetworks(virConnectPtr conn, char **const names,
         int maxnames);
 virNetworkPtr hyperv2NetworkLookupByName(virConnectPtr conn, const char *name);
 int hyperv2ConnectNumOfDefinedNetworks(virConnectPtr conn);
-
+char *hyperv2NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags);
+int hyperv2NetworkSetAutostart(virNetworkPtr network, int autostart);
+int hyperv2NetworkGetAutostart(virNetworkPtr network, int *autostart);
+int hyperv2NetworkIsActive(virNetworkPtr network);
+int hyperv2NetworkIsPersistent(virNetworkPtr network);
 
 #endif /* __HYPERV_NETWORK_API_V2_H__ */

@@ -32,6 +32,11 @@ int hyperv1ConnectListDefinedNetworks(virConnectPtr conn, char **const names,
         int maxnames);
 virNetworkPtr hyperv1NetworkLookupByName(virConnectPtr conn, const char *name);
 int hyperv1ConnectNumOfDefinedNetworks(virConnectPtr conn);
+char *hyperv1NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags);
+int hyperv1NetworkSetAutostart(virNetworkPtr network, int autostart);
+int hyperv1NetworkGetAutostart(virNetworkPtr network, int *autostart);
+int hyperv1NetworkIsActive(virNetworkPtr network);
+int hyperv1NetworkIsPersistent(virNetworkPtr network);
 
 
 #endif /* __HYPERV_NETWORK_API_V1_H__ */
