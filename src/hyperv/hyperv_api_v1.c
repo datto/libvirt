@@ -1679,7 +1679,7 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
 
     /* build ResourceSettingData param */
-    if (VIR_ALLOC_N(NewResources, 5) < 0)
+    if (VIR_ALLOC_N(NewResources, 6) < 0)
         goto cleanup;
     NewResources[0].name = "Connection";
     NewResources[0].val = connection__PATH;
@@ -1691,6 +1691,8 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     NewResources[3].val = "10";
     NewResources[4].name = "ResourceSubType";
     NewResources[4].val = "Microsoft Synthetic Ethernet Port";
+    NewResources[5].name = "StaticMacAddress";
+    NewResources[5].val = "true";
     ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V1_CLASSNAME;
     ResourceSettingData.prop_t = NewResources;
     ResourceSettingData.nbProps = 5;

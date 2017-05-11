@@ -1659,7 +1659,7 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     virMacAddrFormat(&net->mac, mac_string);
     macAddrEscaped = virStringReplace(mac_string, ":", "");
 
-    sepsd_embedded.nbProps = 5;
+    sepsd_embedded.nbProps = 6;
     if (VIR_ALLOC_N(props, sepsd_embedded.nbProps) < 0)
         goto cleanup;
     props[0].name = "ResourceType";
@@ -1672,6 +1672,8 @@ hyperv2DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     props[3].val = virtualSystemIdentifiers;
     props[4].name = "Address";
     props[4].val = macAddrEscaped;
+    props[5].name = "StaticMacAddress";
+    props[5].val = "true";
     sepsd_embedded.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V2_CLASSNAME;
     sepsd_embedded.prop_t = props;
 
