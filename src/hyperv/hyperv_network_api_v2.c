@@ -160,7 +160,7 @@ hyperv2ConnectListAllNetworks(virConnectPtr conn,
 
         nets[i] = network;
         network = NULL;
-        vSwitch = vSwitchList->next;
+        vSwitch = vSwitch->next;
     }
 
     ret = count;
