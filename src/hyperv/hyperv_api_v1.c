@@ -1638,11 +1638,19 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     params[3].type = SIMPLE_PARAM;
     params[3].param = &virtualSwitch_ScopeOfResidence;
 
-    if (virAsprintf(&vswitch_selector,
-                      "CreationClassName=Msvm_VirtualSwitchManagementService&"
-                      "Name=nvspwmi&SystemCreationClassName=Msvm_ComputerSystem&"
-                      "SystemName=%s", hostname) < 0)
+    /* even though 2008 R2 and 2012 (non-R2) share the same "v1" API, there
+     * are subtle differences that still need to be handled
+     */
+    if (STRPREFIX(priv->winVersion, HYPERV_VERSION_2008)) {
+        if (virAsprintf(&vswitch_selector,
+                        "CreationClassName=Msvm_VirtualSwitchManagementService&"
+                        "Name=nvspwmi&SystemCreationClassName=Msvm_ComputerSystem&"
+                        "SystemName=%s", hostname) < 0)
+            goto cleanup;
+    } else if (VIR_STRDUP(vswitch_selector,
+                          "CreationClassName=Msvm_VirtualSwitchManagementService") < 0) {
         goto cleanup;
+    }
 
     if (hyperv1InvokeMethod(priv, params, 4, "CreateSwitchPort",
                 MSVM_VIRTUALSWITCHMANAGEMENTSERVICE_V1_RESOURCE_URI,

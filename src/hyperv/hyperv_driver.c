@@ -217,12 +217,12 @@ cleanup:
     return result;
 }
 
-static char *
+static int
 hypervNodeGetWindowsVersion(hypervPrivate *priv)
 {
+    int result = -1;
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Win32_OperatingSystem *os = NULL;
-    char *result = NULL;
 
     virBufferAddLit(&query, WIN32_OPERATINGSYSTEM_WQL_SELECT);
 
@@ -234,7 +234,10 @@ hypervNodeGetWindowsVersion(hypervPrivate *priv)
         goto cleanup;
     }
 
-    result = os->data->Version;
+    if (VIR_STRDUP(priv->winVersion, os->data->Version) < 0)
+        goto cleanup;
+
+    result = 0;
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) os);
@@ -255,7 +258,6 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     virBuffer query = VIR_BUFFER_INITIALIZER;
     Msvm_ComputerSystem_V1 *computerSystem = NULL;
     Msvm_ComputerSystem_V2 *computerSystem_v2 = NULL;
-    char *winVersion = NULL;
 
     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
 
@@ -357,16 +359,15 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
     priv->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL);
 
     /* determine what version of Windows we're dealing with */
-    winVersion = hypervNodeGetWindowsVersion(priv);
-    VIR_DEBUG("Windows version reported as '%s'", winVersion);
-    if (!winVersion) {
+    if (hypervNodeGetWindowsVersion(priv) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                 _("Could not determine Windows version. Check username and password."));
         goto cleanup;
     }
 
-    if (STRPREFIX(winVersion, HYPERV_VERSION_2008) ||
-        STRPREFIX(winVersion, HYPERV_VERSION_2012)) {
+    VIR_DEBUG("Windows version reported as '%s'", priv->winVersion);
+    if (STRPREFIX(priv->winVersion, HYPERV_VERSION_2008) ||
+        STRPREFIX(priv->winVersion, HYPERV_VERSION_2012)) {
         /* Check if the connection can be established and if the server has the
          * Hyper-V role installed. If the call to hyperv1GetMsvmComputerSystemList
          * succeeds than the connection has been established. If the returned list
@@ -385,8 +386,8 @@ hypervConnectOpen(virConnectPtr conn, virConnectAuthPtr auth,
         }
 
         hypervSetupV1(&hypervHypervisorDriver, &hypervNetworkDriver, priv);
-    } else if (STRPREFIX(winVersion, HYPERV_VERSION_2012_R2) ||
-               STRPREFIX(winVersion, HYPERV_VERSION_2016)) {
+    } else if (STRPREFIX(priv->winVersion, HYPERV_VERSION_2012_R2) ||
+               STRPREFIX(priv->winVersion, HYPERV_VERSION_2016)) {
         /* Check if the connection can be established and if the server has the
          * Hyper-V role installed. If the call to hyperv2GetMsvmComputerSystemList
          * succeeds than the connection has been established. If the returned list
@@ -432,6 +433,7 @@ hypervConnectClose(virConnectPtr conn)
 {
     hypervPrivate *priv = conn->privateData;
 
+    VIR_FREE(priv->winVersion);
     hypervFreePrivate(&priv);
 
     conn->privateData = NULL;
