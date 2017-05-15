@@ -235,11 +235,13 @@ hyperv2NetworkLookupByName(virConnectPtr conn, const char *name)
         virtualSwitch == NULL) {
         virReportError(VIR_ERR_NO_NETWORK,
                        _("No network found with name %s"), name);
-        return NULL;
+        goto cleanup;
     }
 
     ignore_value(hyperv2MsvmVirtualSwitchToNetwork(conn, virtualSwitch, &network));
 
+ cleanup:
+    VIR_FREE(filter);
     hypervFreeObject(priv, (hypervObject *) virtualSwitch);
 
     return network;
@@ -278,7 +280,7 @@ hyperv2NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
 
     if (hyperv2GetVirtualSwitchList(priv, filter, &vSwitch) < 0 ||
         vSwitch == NULL)
-        return NULL;
+        goto cleanup;
 
     memcpy(def->uuid, network->uuid, VIR_UUID_BUFLEN);
     def->uuid_specified = true;
@@ -291,6 +293,7 @@ hyperv2NetworkGetXMLDesc(virNetworkPtr network, unsigned int flags)
     xml = virNetworkDefFormat(def, flags);
 
  cleanup:
+    VIR_FREE(filter);
     hypervFreeObject(priv, (hypervObject *) vSwitch);
     virNetworkDefFree(def);
 
