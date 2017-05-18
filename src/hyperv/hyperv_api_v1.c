@@ -1587,6 +1587,8 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     char switchport_guid_string[VIR_UUID_STRING_BUFLEN];
     char guest_guid_string[VIR_UUID_STRING_BUFLEN];
     char uuid_string[VIR_UUID_STRING_BUFLEN];
+    char mac_string[VIR_MAC_STRING_BUFLEN];
+    char *macAddrEscaped = NULL;
     char *vswitch_selector = NULL;
     const char *managementservice_selector =
         "CreationClassName=Msvm_VirtualSystemManagementService";
@@ -1670,6 +1672,10 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
                 switchport_guid_string, net->data.bridge.brname) < 0)
         goto cleanup;
 
+    /* get the MAC address */
+    virMacAddrFormat(&net->mac, mac_string);
+    macAddrEscaped = virStringReplace(mac_string, ":", "");
+
     /* build the ComputerSystem_REF parameter */
     virUUIDFormat(domain->uuid, uuid_string);
     virBufferFreeAndReset(&query);
@@ -1679,7 +1685,8 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     ComputerSystem_REF.wmiProviderURI = ROOT_VIRTUALIZATION;
 
     /* build ResourceSettingData param */
-    if (VIR_ALLOC_N(NewResources, 6) < 0)
+    ResourceSettingData.nbProps = 7;
+    if (VIR_ALLOC_N(NewResources, ResourceSettingData.nbProps) < 0)
         goto cleanup;
     NewResources[0].name = "Connection";
     NewResources[0].val = connection__PATH;
@@ -1693,9 +1700,10 @@ hyperv1DomainAttachSyntheticEthernetAdapter(virDomainPtr domain,
     NewResources[4].val = "Microsoft Synthetic Ethernet Port";
     NewResources[5].name = "StaticMacAddress";
     NewResources[5].val = "true";
+    NewResources[6].name = "Address";
+    NewResources[6].val = macAddrEscaped;
     ResourceSettingData.instanceName = MSVM_SYNTHETICETHERNETPORTSETTINGDATA_V1_CLASSNAME;
     ResourceSettingData.prop_t = NewResources;
-    ResourceSettingData.nbProps = 5;
 
     /* build xml params */
     VIR_FREE(params);
@@ -1723,6 +1731,7 @@ cleanup:
     VIR_FREE(virtualSystemIdentifiers);
     VIR_FREE(connection__PATH);
     VIR_FREE(NewResources);
+    VIR_FREE(macAddrEscaped);
     VIR_FREE(params);
     virBufferFreeAndReset(&query);
 
