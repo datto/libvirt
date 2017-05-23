@@ -3025,9 +3025,16 @@ hyperv2DomainShutdownFlags(virDomainPtr domain, unsigned int flags)
     int result = -1;
     hypervPrivate *priv = domain->conn->privateData;
     Msvm_ComputerSystem_V2 *computerSystem = NULL;
+    Msvm_ShutdownComponent_V2 *shutdown = NULL;
     bool in_transition = false;
+    char uuid[VIR_UUID_STRING_BUFLEN];
+    virBuffer query = VIR_BUFFER_INITIALIZER;
+    simpleParam force, reason;
+    invokeXmlParam *params;
+    char *selector = NULL;
 
     virCheckFlags(0, -1);
+    virUUIDFormat(domain->uuid, uuid);
 
     if (hyperv2MsvmComputerSystemFromDomain(domain, &computerSystem) < 0)
         goto cleanup;
@@ -3038,11 +3045,46 @@ hyperv2DomainShutdownFlags(virDomainPtr domain, unsigned int flags)
         goto cleanup;
     }
 
-    result = hyperv2InvokeMsvmComputerSystemRequestStateChange(domain,
-            MSVM_COMPUTERSYSTEM_V2_REQUESTEDSTATE_DISABLED);
+    virBufferAsprintf(&query,
+            "Select * from Msvm_ShutdownComponent "
+            "where SystemName = \"%s\"", uuid);
+
+    if (hyperv2GetMsvmShutdownComponentList(priv, &query, &shutdown) < 0 ||
+            shutdown == NULL)
+        goto cleanup;
+
+    if (virAsprintf(&selector,
+            "CreationClassName=\"Msvm_ShutdownComponent\"&"
+            "DeviceID=\"%s\"&"
+            "SystemCreationClassName=\"Msvm_ComputerSystem\"&"
+            "SystemName=\"%s\"", shutdown->data->DeviceID, uuid) < 0)
+        goto cleanup;
+
+    force.value = "False";
+    reason.value = "Planned shutdown via Libvirt";
+
+    if (VIR_ALLOC_N(params, 2) < 0)
+        goto cleanup;
+    params[0].name = "Force";
+    params[0].type = SIMPLE_PARAM;
+    params[0].param = &force;
+    params[1].name = "Reason";
+    params[1].type = SIMPLE_PARAM;
+    params[1].param = &reason;
+
+    if (hyperv2InvokeMethod(priv, params, 2, "InitiateShutdown",
+                MSVM_SHUTDOWNCOMPONENT_V2_RESOURCE_URI, selector, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, _("Could not shutdown domain"));
+        goto cleanup;
+    }
+
+    result = 0;
 
 cleanup:
     hypervFreeObject(priv, (hypervObject *) computerSystem);
+    hypervFreeObject(priv, (hypervObject *) shutdown);
+    VIR_FREE(params);
+    VIR_FREE(selector);
     return result;
 }
 
