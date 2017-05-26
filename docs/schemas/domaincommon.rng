@@ -1458,7 +1458,10 @@
         <element name="source">
           <optional>
             <attribute name="dev">
-              <ref name="absFilePath"/>
+              <choice>
+                <ref name="absFilePath"/>
+                <ref name="deviceName"/>
+              </choice>
             </attribute>
           </optional>
           <optional>
