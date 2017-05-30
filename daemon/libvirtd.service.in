@@ -16,6 +16,12 @@ After=local-fs.target
 After=remote-fs.target
 Documentation=man:libvirtd(8)
 Documentation=http://libvirt.org
+# This says, start libvirtd if not in a VM OR if not in a Fedora live env
+# Roundabout way to prevent the 'default' network killing connectivity
+# of the livecd running in a VM
+# https://bugzilla.redhat.com/show_bug.cgi?id=1146232
+ConditionVirtualization=|0
+ConditionKernelCommandLine=|!rd.live.image
 
 [Service]
 Type=notify
