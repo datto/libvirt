@@ -13,19 +13,12 @@
 
   <release version="FIXME" date="unreleased">
     <section title="New features">
-      <change>
-        <summary/>
-      </change>
+<<<<<<< HEAD
+=======
     </section>
     <section title="Improvements">
-      <change>
-        <summary/>
-      </change>
     </section>
     <section title="Bug fixes">
-      <change>
-        <summary/>
-      </change>
     </section>
   </release>
 
@@ -39,6 +32,7 @@
       <change>
         <summary>
           The libvirt Hyper-V driver now supports Hyper-V 2012 and newer.
+          hyperv: Implement virDomainSetMemory and virDomainSendKey APIs
         </summary>
         <description>
           Starting with Hyper-V 2012 the API has changed causing the existing
